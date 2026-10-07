@@ -5,7 +5,7 @@ import pytest
 from google.transit import gtfs_realtime_pb2
 
 from filbleu.__main__ import format_departures
-from filbleu.departures import next_departures
+from filbleu.departures import next_departures, trip_key
 from filbleu.gtfs import TIMEZONE, Gtfs
 from filbleu.realtime import parse_trip_updates
 
@@ -151,3 +151,16 @@ def test_line_filter_and_after_midnight(gtfs):
     now = datetime(2026, 10, 8, 0, 20, tzinfo=TIMEZONE)
     deps = next_departures(gtfs, ["JJ_A"], {}, now=now, lines={"2"})
     assert [(d.trip_id, f"{d.expected:%d %H:%M}") for d in deps] == [("T5", "08 00:30")]
+
+
+def test_trip_key_ignores_dataset_variant():
+    gtfs_id = "#JDD-1055#2176801#2408271-Hiver-Sco_14Sept26#0#SEMAINE#289131"
+    rt_id = "#JDD-1038-1#2176801#2164643-Hiver-Sco_14Sept26#0#SEMAINE#289131"
+    assert trip_key(gtfs_id) == trip_key(rt_id) == "289131"
+    assert trip_key("T1") == "T1"
+
+
+def test_realtime_only(gtfs):
+    deps = next_departures(gtfs, ["JJ_A", "JJ_B"], make_feed(), now=NOW, realtime_only=True)
+    assert "T6" not in [d.trip_id for d in deps]
+    assert all(d.realtime for d in deps)

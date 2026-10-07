@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -10,6 +11,17 @@ from .realtime import StopUpdate, TripUpdate
 
 # Marge pour retrouver les bus en retard dont l'horaire théorique est déjà passé.
 LATE_MARGIN = timedelta(minutes=30)
+
+# Les trip_id Fil Bleu (« #JDD-1055#2176801#2408271-Hiver-…#SEMAINE#289131 ») varient
+# selon le jeu de données et la période : le flux temps réel peut citer une autre
+# variante que celle active dans le GTFS. Seul le numéro de course final est stable.
+_FILBLEU_TRIP = re.compile(r"^#JDD-.*#(\d+)$")
+
+
+def trip_key(trip_id: str) -> str:
+    """Identifiant de course stable entre GTFS et temps réel."""
+    m = _FILBLEU_TRIP.match(trip_id)
+    return m.group(1) if m else trip_id
 
 
 @dataclass
@@ -94,17 +106,18 @@ def _estimate(sched: ScheduledStop, tu: TripUpdate, times: _TripTimes):
 
 
 def next_departures(
-    gtfs: Gtfs,
+    gtfs: Gtfs,  # ou tout objet offrant scheduled_departures, trip_stop_times et route
     stop_ids: list[str],
     trip_updates: dict[str, TripUpdate] | None = None,
     now: datetime | None = None,
     limit: int = 10,
     horizon: timedelta = timedelta(hours=2),
     lines: set[str] | None = None,
+    realtime_only: bool = False,
 ) -> list[Departure]:
     """Prochains passages aux quais ``stop_ids``, triés par horaire estimé."""
     now = now or datetime.now(TIMEZONE)
-    trip_updates = trip_updates or {}
+    trip_updates = {trip_key(t): tu for t, tu in (trip_updates or {}).items()}
     stop_set = set(stop_ids)
     routes: dict[str, tuple[str, str]] = {}
 
@@ -117,8 +130,8 @@ def next_departures(
     result: list[Departure] = []
     seen_trips: set[str] = set()
     for sched in gtfs.scheduled_departures(stop_ids, now - LATE_MARGIN, now + horizon):
-        seen_trips.add(sched.trip_id)
-        tu = trip_updates.get(sched.trip_id)
+        seen_trips.add(trip_key(sched.trip_id))
+        tu = trip_updates.get(trip_key(sched.trip_id))
         if tu is not None and tu.start_date and tu.start_date != sched.service_date.strftime("%Y%m%d"):
             tu = None
         if tu is None:
@@ -132,8 +145,8 @@ def next_departures(
                                 expected, sched.time, realtime, canceled))
 
     # Courses ajoutées en temps réel, absentes du théorique.
-    for tu in trip_updates.values():
-        if tu.trip_id in seen_trips or gtfs.trip(tu.trip_id) is not None:
+    for key, tu in trip_updates.items():
+        if key in seen_trips or not tu.added:
             continue
         for upd in tu.updates:
             if upd.stop_id in stop_set and upd.time is not None and not upd.skipped:
@@ -147,6 +160,7 @@ def next_departures(
         d for d in result
         if d.expected >= now and d.expected <= now + horizon
         and (lines is None or d.line.lower() in lines)
+        and (not realtime_only or d.realtime)
     ]
     result.sort(key=lambda d: d.expected)
     return result[:limit]

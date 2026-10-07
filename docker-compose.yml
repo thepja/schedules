@@ -1,0 +1,48 @@
+# Seule la passerelle est exposée (http://localhost:8000) ; les autres services
+# communiquent sur le réseau interne de Compose.
+x-service: &service
+  build: &build
+    context: .
+    dockerfile: services/Dockerfile
+  restart: unless-stopped
+
+services:
+  gtfs:
+    <<: *service
+    build: { <<: *build, args: { SERVICE: gtfs } }
+    environment:
+      FILBLEU_CACHE: /data
+    volumes:
+      - gtfs-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      start_period: 120s  # premier téléchargement du GTFS
+
+  realtime:
+    <<: *service
+    build: { <<: *build, args: { SERVICE: realtime } }
+
+  departures:
+    <<: *service
+    build: { <<: *build, args: { SERVICE: departures } }
+    environment:
+      GTFS_SERVICE_URL: http://gtfs:8000
+      REALTIME_SERVICE_URL: http://realtime:8000
+    depends_on:
+      gtfs: { condition: service_healthy }
+      realtime: { condition: service_started }
+
+  gateway:
+    <<: *service
+    build: { <<: *build, args: { SERVICE: gateway } }
+    environment:
+      GTFS_SERVICE_URL: http://gtfs:8000
+      REALTIME_SERVICE_URL: http://realtime:8000
+      DEPARTURES_SERVICE_URL: http://departures:8000
+    ports:
+      - "8000:8000"
+    depends_on: [departures]
+
+volumes:
+  gtfs-data:

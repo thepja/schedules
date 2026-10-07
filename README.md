@@ -28,6 +28,7 @@ python3 -m venv .venv
 .venv/bin/python -m filbleu --search jaures          # lister les arrêts / stop_id correspondants
 .venv/bin/python -m filbleu <stop_id>                # un quai précis (un seul sens)
 .venv/bin/python -m filbleu "Jean Jaurès" --watch 30 # affichage rafraîchi toutes les 30 s
+.venv/bin/python -m filbleu "Jean Jaurès" -r          # passages suivis en temps réel uniquement
 ```
 
 Exemple de sortie :
@@ -45,6 +46,39 @@ réel est indisponible, l'outil affiche les horaires théoriques.
 
 Les URLs peuvent être surchargées via `--gtfs-url` / `--rt-url` (ou les variables
 `FILBLEU_GTFS_URL` / `FILBLEU_RT_URL`), et `--gtfs-zip` permet d'utiliser un GTFS local.
+
+### Site web (micro-services)
+
+Un site affiche les prochains passages, rafraîchis toutes les 20 s, avec recherche
+d'arrêt, choix de la direction et filtre « temps réel uniquement ». Par défaut il
+montre le tram A à Christ Roi direction Lycée J. Monnet ; l'URL garde la sélection
+(`?stop=Christ+Roi&quai=TTR:CHRI-1T&line=A&rt=1`).
+
+```
+navigateur ──> gateway :8000 ──/api/stops──────> gtfs :8001        (GTFS, SQLite, rafraîchi 24 h)
+                 (site)    └──/api/departures──> departures :8003 ─┬─> gtfs
+                                                                   └─> realtime :8002 (GTFS-RT, toutes les 20 s)
+```
+
+| Service | Rôle | Principales routes |
+|---|---|---|
+| `gtfs` | données théoriques | `/stops/search`, `/stops/resolve`, `/stops/directions`, `/scheduled`, `/routes`, `POST /trips/stop-times` |
+| `realtime` | cache du flux GTFS-RT | `/trip-updates` |
+| `departures` | fusion théorique + temps réel, sans état | `/departures?stop=…&line=…&realtime_only=…` |
+| `gateway` | site statique + relais `/api/*` ; seul service exposé | `/`, `/api/health` |
+
+Avec Docker :
+
+```sh
+docker compose up --build   # http://localhost:8000
+```
+
+Sans Docker :
+
+```sh
+.venv/bin/pip install -r services/requirements.txt
+./scripts/run-local.sh      # http://localhost:8000
+```
 
 ### En Python
 

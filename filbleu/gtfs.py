@@ -11,6 +11,7 @@ import csv
 import io
 import os
 import sqlite3
+import ssl
 import time
 import unicodedata
 import urllib.request
@@ -23,6 +24,18 @@ from zoneinfo import ZoneInfo
 GTFS_URL = "https://transport.data.gouv.fr/resources/80694/download"
 TIMEZONE = ZoneInfo("Europe/Paris")
 DEFAULT_MAX_AGE = 24 * 3600
+
+
+def ssl_context() -> ssl.SSLContext:
+    """Contexte TLS utilisant les certificats de certifi s'il est installé.
+
+    Le Python de python.org sous macOS n'a pas accès aux certificats système.
+    """
+    try:
+        import certifi
+    except ImportError:
+        return ssl.create_default_context()
+    return ssl.create_default_context(cafile=certifi.where())
 
 SCHEMA = """
 CREATE TABLE stops (
@@ -161,7 +174,8 @@ def build_database(zip_path: str, db_path: str) -> None:
 def download(url: str, dest: str, timeout: int = 60) -> None:
     req = urllib.request.Request(url, headers={"User-Agent": "schedules-filbleu"})
     tmp = dest + ".part"
-    with urllib.request.urlopen(req, timeout=timeout) as resp, open(tmp, "wb") as out:
+    with urllib.request.urlopen(req, timeout=timeout, context=ssl_context()) as resp, \
+            open(tmp, "wb") as out:
         while chunk := resp.read(1 << 16):
             out.write(chunk)
     os.replace(tmp, dest)
@@ -190,7 +204,8 @@ class Gtfs:
     """Accès aux données théoriques stockées dans la base SQLite."""
 
     def __init__(self, db_path: str):
-        self.db = sqlite3.connect(db_path)
+        # Accès en lecture seule, partagé entre les threads d'un serveur web.
+        self.db = sqlite3.connect(db_path, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
 
     @classmethod

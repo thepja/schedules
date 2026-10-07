@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 
 from google.transit import gtfs_realtime_pb2
 
+from .gtfs import ssl_context
+
 TRIP_UPDATES_URL = "https://data.filbleu.fr/ws-tr/gtfs-rt/opendata/trip-updates"
 
 TripDescriptor = gtfs_realtime_pb2.TripDescriptor
@@ -90,5 +92,12 @@ def parse_trip_updates(data: bytes) -> dict[str, TripUpdate]:
 
 def fetch_trip_updates(url: str = TRIP_UPDATES_URL, timeout: int = 15) -> dict[str, TripUpdate]:
     req = urllib.request.Request(url, headers={"User-Agent": "schedules-filbleu"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with urllib.request.urlopen(req, timeout=timeout, context=ssl_context()) as resp:
         return parse_trip_updates(resp.read())
+
+
+def trip_update_from_dict(data: dict) -> TripUpdate:
+    """Inverse de ``dataclasses.asdict`` : reconstruit une TripUpdate reçue en JSON."""
+    data = dict(data)
+    updates = [StopUpdate(**u) for u in data.pop("updates", [])]
+    return TripUpdate(**data, updates=updates)

@@ -46,6 +46,8 @@ def main(argv=None) -> int:
     p.add_argument("stop", help="nom de l'arrêt (ex. « Jean Jaurès ») ou stop_id GTFS")
     p.add_argument("-n", "--limit", type=int, default=10, help="nombre de passages (défaut 10)")
     p.add_argument("-l", "--line", action="append", help="filtrer sur une ligne (répétable)")
+    p.add_argument("-r", "--realtime-only", action="store_true",
+                   help="n'afficher que les passages suivis en temps réel")
     p.add_argument("--horizon", type=int, default=120, help="fenêtre en minutes (défaut 120)")
     p.add_argument("--search", action="store_true", help="lister les arrêts correspondants")
     p.add_argument("--watch", type=int, metavar="SEC", help="rafraîchir toutes les SEC secondes")
@@ -78,7 +80,8 @@ def main(argv=None) -> int:
             updates, rt_ok = {}, False
         now = datetime.now(TIMEZONE)
         deps = next_departures(gtfs, stop_ids, updates, now=now, limit=args.limit,
-                               horizon=timedelta(minutes=args.horizon), lines=lines)
+                               horizon=timedelta(minutes=args.horizon), lines=lines,
+                               realtime_only=args.realtime_only)
         output = format_departures(stop_name, deps, now, rt_ok)
         if not args.watch:
             print(output)

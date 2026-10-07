@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Prochains passages Fil Bleu</title>
+  <meta name="theme-color" content="#0b5cab">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap">
+      <div class="brand"><span class="logo" aria-hidden="true">●</span> Fil Bleu <span class="muted">· prochains passages</span></div>
+      <form class="search" id="search-form" autocomplete="off" role="search">
+        <label class="sr-only" for="search">Rechercher un arrêt</label>
+        <input id="search" type="search" placeholder="Rechercher un arrêt…" spellcheck="false">
+        <ul id="suggestions" class="suggestions" role="listbox" hidden></ul>
+      </form>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="stop-head">
+      <h1 id="stop-name">…</h1>
+      <label class="toggle">
+        <input type="checkbox" id="rt-only">
+        <span class="track" aria-hidden="true"></span>
+        Temps réel uniquement
+      </label>
+    </section>
+
+    <nav id="directions" class="directions" aria-label="Direction"></nav>
+
+    <p id="notice" class="notice" hidden></p>
+    <ol id="departures" class="departures" aria-live="polite"></ol>
+
+    <footer class="status">
+      <span id="updated"></span>
+      <button id="refresh" type="button">Actualiser</button>
+    </footer>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
