@@ -14,6 +14,7 @@ let favorites = loadFavorites();
 const state = readUrl();
 let lastData = null;
 let timer = null;
+let tab = new URLSearchParams(location.search).get("tab") === "trains" ? "trains" : "bus";
 
 function readUrl() {
   const p = new URLSearchParams(location.search);
@@ -28,6 +29,7 @@ function readUrl() {
 function writeUrl() {
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(state)) if (v) p.set(k, v);
+  if (tab === "trains") p.set("tab", "trains");
   history.replaceState(null, "", "?" + p);
 }
 
@@ -188,8 +190,7 @@ function openFavorite(f) {
   const sameStop = f.stop === state.stop && directionsData;
   Object.assign(state, { stop: f.stop, quai: f.quai, line: f.line });
   if (sameStop) select(f.quai, f.line);
-  else renderFavorites();
-loadStop();
+  else loadStop();
   renderFavorites();
 }
 
@@ -241,6 +242,7 @@ async function loadStop() {
 
 async function loadDepartures() {
   clearTimeout(timer);
+  if (tab !== "bus") return;
   writeUrl();
   let delay = REFRESH_MS;
   try {
@@ -266,6 +268,101 @@ function select(quai, line) {
   renderDirections(directionsData);
   renderFavorites();
   loadDepartures();
+}
+
+// --- Trains au départ de la gare de Tours ---------------------------------------------
+
+let trainsData = null;
+let trainsTimer = null;
+
+function showTrainsNotice(text, isError = false) {
+  const n = $("trains-notice");
+  n.hidden = !text;
+  n.textContent = text || "";
+  n.classList.toggle("error", isError);
+}
+
+function modeClass(mode) {
+  const m = mode.toLowerCase();
+  return m.includes("tgv") || m.includes("ouigo") ? "tgv" : m.includes("car") ? "car" : "";
+}
+
+function renderTrains() {
+  const list = $("trains");
+  list.replaceChildren();
+  if (!trainsData) return;
+  const now = Date.now();
+  const deps = trainsData.departures.filter((d) => new Date(d.expected).getTime() >= now - 60000);
+  if (!deps.length) {
+    list.append(el("li", { class: "empty" }, "Aucun départ dans les 4 prochaines heures."));
+    return;
+  }
+  for (const d of deps) {
+    const expected = new Date(d.expected);
+    const scheduled = d.scheduled ? new Date(d.scheduled) : expected;
+    const delay = Math.round((d.delay_seconds || 0) / 60);
+    const mins = Math.max(0, Math.floor((expected - now) / 60000));
+
+    const time = d.realtime && !d.canceled && delay > 0
+      ? el("div", { class: "t-time" }, el("s", {}, hhmm(scheduled)), el("span", { class: "late" }, hhmm(expected)))
+      : el("div", { class: "t-time" }, el("strong", {}, hhmm(scheduled)));
+
+    let status;
+    if (d.canceled) status = el("span", { class: "canceled-tag" }, "Supprimé");
+    else if (!d.realtime) status = el("span", { class: "muted" }, "Prévu");
+    else if (delay > 0) status = el("span", { class: "late" }, `+${delay} min`);
+    else status = el("span", { class: "live on-time" }, "À l'heure");
+
+    const label = [d.mode, d.number].filter(Boolean).join(" ");
+    list.append(el("li", { class: "dep train" + (d.canceled ? " canceled" : "") },
+      time,
+      el("div", { style: "min-width:0" },
+        el("div", { class: "dest" }, d.destination || "—"),
+        el("div", { class: "meta" }, label ? el("span", { class: "mode " + modeClass(d.mode) }, label) : null,
+          d.via.length ? el("span", { class: "via" }, "via " + d.via.slice(0, 3).join(", ") + (d.via.length > 3 ? "…" : "")) : null)),
+      el("div", { class: "t-status" }, status,
+        d.canceled ? null : el("span", { class: "in" }, mins === 0 ? "maintenant" : `dans ${mins} min`))));
+  }
+}
+
+async function loadTrains() {
+  clearTimeout(trainsTimer);
+  if (tab !== "trains") return;
+  let delay = REFRESH_MS;
+  try {
+    trainsData = await api("trains", { limit: 20 });
+    $("station-name").textContent = "Gare de " + trainsData.station;
+    showTrainsNotice(trainsData.realtime_available ? "" : "Temps réel SNCF indisponible : horaires prévus uniquement.");
+    $("trains-updated").textContent = "Mis à jour à " + hhmm(new Date());
+  } catch (e) {
+    showTrainsNotice(e.message, !e.waking);
+    if (e.waking) delay = WAKE_RETRY_MS;
+  }
+  renderTrains();
+  trainsTimer = setTimeout(loadTrains, delay);
+}
+
+// --- Onglets ---------------------------------------------------------------------
+
+let busLoaded = false;
+
+function switchTab(next) {
+  tab = next;
+  for (const t of ["bus", "trains"]) {
+    $("tab-" + t).setAttribute("aria-selected", String(t === tab));
+    $("view-" + t).hidden = t !== tab;
+  }
+  $("search-form").hidden = tab !== "bus";
+  writeUrl();
+  if (tab === "trains") {
+    clearTimeout(timer);
+    document.title = "Trains au départ de Tours";
+    loadTrains();
+  } else {
+    clearTimeout(trainsTimer);
+    if (busLoaded) loadDepartures();
+    else { busLoaded = true; loadStop(); }
+  }
 }
 
 // --- Recherche d'arrêt -------------------------------------------------------------
@@ -322,7 +419,13 @@ $("refresh").addEventListener("click", loadDepartures);
 $("fav-toggle").addEventListener("click", toggleFavorite);
 // Favoris modifiés dans un autre onglet.
 window.addEventListener("storage", (e) => { if (e.key === FAVORITES_KEY) { favorites = loadFavorites(); renderFavorites(); } });
-document.addEventListener("visibilitychange", () => { if (!document.hidden) loadDepartures(); });
-setInterval(renderDepartures, 15000);  // décompte des minutes entre deux actualisations
+$("trains-refresh").addEventListener("click", loadTrains);
+$("tab-bus").addEventListener("click", () => switchTab("bus"));
+$("tab-trains").addEventListener("click", () => switchTab("trains"));
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) (tab === "bus" ? loadDepartures : loadTrains)();
+});
+setInterval(() => (tab === "bus" ? renderDepartures : renderTrains)(), 15000);  // décompte des minutes
 
-loadStop();
+renderFavorites();
+switchTab(tab);

@@ -33,6 +33,14 @@ services:
       gtfs: { condition: service_healthy }
       realtime: { condition: service_started }
 
+  trains:
+    <<: *service
+    build: { <<: *build, args: { SERVICE: trains } }
+    environment:
+      FILBLEU_CACHE: /data
+    volumes:
+      - trains-data:/data
+
   gateway:
     <<: *service
     build: { <<: *build, args: { SERVICE: gateway } }
@@ -40,9 +48,11 @@ services:
       GTFS_SERVICE_URL: http://gtfs:8000
       REALTIME_SERVICE_URL: http://realtime:8000
       DEPARTURES_SERVICE_URL: http://departures:8000
+      TRAINS_SERVICE_URL: http://trains:8000
     ports:
       - "8000:8000"
-    depends_on: [departures]
+    depends_on: [departures, trains]
 
 volumes:
   gtfs-data:
+  trains-data:

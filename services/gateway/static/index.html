@@ -17,9 +17,13 @@
         <ul id="suggestions" class="suggestions" role="listbox" hidden></ul>
       </form>
     </div>
+    <nav class="wrap tabs" role="tablist" aria-label="Mode">
+      <button id="tab-bus" class="tab" type="button" role="tab" aria-controls="view-bus">Bus &amp; tram</button>
+      <button id="tab-trains" class="tab" type="button" role="tab" aria-controls="view-trains">Trains · Gare de Tours</button>
+    </nav>
   </header>
 
-  <main class="wrap">
+  <main class="wrap" id="view-bus" role="tabpanel" aria-labelledby="tab-bus">
     <nav id="favorites" class="favorites" aria-label="Favoris" hidden></nav>
 
     <section class="stop-head">
@@ -42,6 +46,19 @@
     <footer class="status">
       <span id="updated"></span>
       <button id="refresh" type="button">Actualiser</button>
+    </footer>
+  </main>
+
+  <main class="wrap" id="view-trains" role="tabpanel" aria-labelledby="tab-trains" hidden>
+    <section class="stop-head">
+      <h1 id="station-name">Gare de Tours</h1>
+      <span class="muted small">Départs TGV, Intercités et TER</span>
+    </section>
+    <p id="trains-notice" class="notice" hidden></p>
+    <ol id="trains" class="departures" aria-live="polite"></ol>
+    <footer class="status">
+      <span id="trains-updated"></span>
+      <button id="trains-refresh" type="button">Actualiser</button>
     </footer>
   </main>
 

@@ -60,3 +60,11 @@ def test_unknown_stop(client):
     resp = client.get("/departures", params={"stop": "inconnu"})
     assert resp.status_code == 404
     assert "Aucun arrêt" in resp.json()["detail"]
+
+
+def test_train_mode():
+    from services.trains.app import mode
+    assert mode("StopPoint:OCETGV INOUI-87571000") == "TGV INOUI"
+    assert mode("StopPoint:OCETrain TER-87571000") == "TER"
+    assert mode("StopPoint:OCECar TER-87571000") == "Car TER"
+    assert mode("autre") == ""

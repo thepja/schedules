@@ -164,3 +164,19 @@ def test_realtime_only(gtfs):
     deps = next_departures(gtfs, ["JJ_A", "JJ_B"], make_feed(), now=NOW, realtime_only=True)
     assert "T6" not in [d.trip_id for d in deps]
     assert all(d.realtime for d in deps)
+
+
+def test_build_database_only_stations(tmp_path):
+    zip_path = tmp_path / "gtfs.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        for name, content in FILES.items():
+            zf.writestr(name, content)
+    gtfs = Gtfs.load(str(tmp_path / "cache"), zip_path=str(zip_path), name="jj",
+                     only_stations=["JJ"])  # zone d'arrêt : ses quais JJ_A et JJ_B
+    trips = {r[0] for r in gtfs.db.execute("SELECT trip_id FROM trips")}
+    assert trips == {"T1", "T2", "T3", "T4", "T5", "T6"}  # toutes passent à Jean Jaurès
+    gtfs = Gtfs.load(str(tmp_path / "cache"), zip_path=str(zip_path), name="jjb",
+                     only_stations=["JJ_B"])
+    assert [r[0] for r in gtfs.db.execute("SELECT trip_id FROM trips")] == ["T3"]
+    # Les courses gardées le sont en entier (destination, propagation des retards).
+    assert len(gtfs.trip_stop_times("T3")) == 3

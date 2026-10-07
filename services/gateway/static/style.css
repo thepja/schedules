@@ -71,6 +71,34 @@ h1 { font-size: 1.6rem; margin: 0; letter-spacing: -.02em; }
 .toggle input:checked + .track::after { transform: translateX(16px); }
 .toggle input:focus-visible + .track { box-shadow: 0 0 0 3px var(--accent-soft); }
 
+/* Onglets */
+.tabs { display: flex; gap: 4px; margin-top: 10px; margin-bottom: -12px; }
+.tab {
+  flex: 1; padding: 10px 8px; font: inherit; font-size: .92rem; font-weight: 600; color: var(--muted);
+  background: none; border: 0; border-bottom: 3px solid transparent; cursor: pointer;
+}
+.tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+.top .search[hidden] { display: none; }
+.small { font-size: .85rem; }
+
+/* Trains */
+.train { grid-template-columns: 64px 1fr auto; }
+.t-time { font-variant-numeric: tabular-nums; line-height: 1.15; }
+.t-time strong { font-size: 1.3rem; font-weight: 800; letter-spacing: -.02em; }
+.t-time s { display: block; font-size: .8rem; color: var(--muted); }
+.t-time .late { font-size: 1.3rem; font-weight: 800; }
+.mode {
+  display: inline-block; padding: 1px 6px; border-radius: 5px; font-size: .75rem; font-weight: 700;
+  background: var(--accent-soft); color: var(--accent); white-space: nowrap;
+}
+.mode.tgv { background: #f3e3ef; color: #9b1d64; }
+.mode.car { background: var(--border); color: var(--muted); }
+@media (prefers-color-scheme: dark) { .mode.tgv { background: #3a1f33; color: #f08ac8; } }
+.via { font-size: .8rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.t-status { text-align: right; font-size: .85rem; font-weight: 600; white-space: nowrap; }
+.t-status .in { display: block; font-weight: 400; color: var(--muted); font-size: .8rem; }
+.on-time { color: var(--live); }
+
 /* Favoris */
 .favorites[hidden] { display: none; }
 .favorites { display: flex; gap: 8px; overflow-x: auto; padding: 16px 0 4px; scrollbar-width: thin; }
@@ -153,3 +181,7 @@ h1 { font-size: 1.6rem; margin: 0; letter-spacing: -.02em; }
   .top .wrap { flex-direction: row; align-items: center; justify-content: space-between; }
   .search { width: 280px; }
 }
+
+/* Après les règles de l'en-tête : les onglets restent en ligne, les noms de gares tels quels. */
+.top .tabs { flex-direction: row; gap: 4px; }
+.train .dest { text-transform: none; }

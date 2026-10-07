@@ -21,11 +21,13 @@ SERVICES = {
     "gtfs": os.environ.get("GTFS_SERVICE_URL", "http://localhost:8001"),
     "realtime": os.environ.get("REALTIME_SERVICE_URL", "http://localhost:8002"),
     "departures": os.environ.get("DEPARTURES_SERVICE_URL", "http://localhost:8003"),
+    "trains": os.environ.get("TRAINS_SERVICE_URL", "http://localhost:8004"),
 }
 # Préfixe public -> (service, chemin interne)
 ROUTES = {
     "stops": ("gtfs", "/stops"),
     "departures": ("departures", "/departures"),
+    "trains": ("trains", "/departures"),
 }
 
 client = httpx.AsyncClient(timeout=60)

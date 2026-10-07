@@ -102,14 +102,26 @@ def _int(value, default=None):
         return default
 
 
-def build_database(zip_path: str, db_path: str) -> None:
-    """Convertit un fichier GTFS (zip) en base SQLite."""
+def _station_trips(zf: zipfile.ZipFile, stations: set[str]) -> set[str]:
+    """Courses desservant un des arrêts ``stations`` (ou un de leurs quais)."""
+    stop_ids = {r["stop_id"] for r in _rows(zf, "stops.txt")
+                if r["stop_id"] in stations or r.get("parent_station") in stations}
+    return {r["trip_id"] for r in _rows(zf, "stop_times.txt") if r["stop_id"] in stop_ids}
+
+
+def build_database(zip_path: str, db_path: str, only_stations: list[str] | None = None) -> None:
+    """Convertit un fichier GTFS (zip) en base SQLite.
+
+    ``only_stations`` limite la base aux courses desservant ces arrêts : utile pour
+    un GTFS national dont on ne consulte qu'une gare.
+    """
     tmp_path = db_path + ".tmp"
     if os.path.exists(tmp_path):
         os.remove(tmp_path)
     db = sqlite3.connect(tmp_path)
     db.executescript(SCHEMA)
     with zipfile.ZipFile(zip_path) as zf:
+        keep = _station_trips(zf, set(only_stations)) if only_stations else None
         db.executemany(
             "INSERT INTO stops VALUES (?, ?, ?, ?, ?)",
             (
@@ -132,6 +144,7 @@ def build_database(zip_path: str, db_path: str) -> None:
                 (r["trip_id"], r["route_id"], r["service_id"], r.get("trip_headsign", ""),
                  _int(r.get("direction_id")))
                 for r in _rows(zf, "trips.txt")
+                if keep is None or r["trip_id"] in keep
             ),
         )
         weekdays = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
@@ -153,6 +166,8 @@ def build_database(zip_path: str, db_path: str) -> None:
 
         def stop_times():
             for r in _rows(zf, "stop_times.txt"):
+                if keep is not None and r["trip_id"] not in keep:
+                    continue
                 arrival = parse_gtfs_time(r.get("arrival_time", ""))
                 departure = parse_gtfs_time(r.get("departure_time", ""))
                 yield (r["trip_id"], r["stop_id"], int(r["stop_sequence"]),
@@ -210,23 +225,26 @@ class Gtfs:
 
     @classmethod
     def load(cls, cache_dir: str, url: str = GTFS_URL, max_age: int = DEFAULT_MAX_AGE,
-             zip_path: str | None = None) -> "Gtfs":
+             zip_path: str | None = None, name: str = "filbleu_gtfs",
+             only_stations: list[str] | None = None) -> "Gtfs":
         """Ouvre la base, en (re)téléchargeant le GTFS s'il est absent ou trop ancien.
 
-        ``zip_path`` permet d'utiliser un fichier GTFS local à la place du téléchargement.
+        ``zip_path`` permet d'utiliser un fichier GTFS local à la place du téléchargement ;
+        ``name`` nomme les fichiers du cache et ``only_stations`` filtre les courses
+        (voir ``build_database``).
         """
         os.makedirs(cache_dir, exist_ok=True)
-        db_path = os.path.join(cache_dir, "filbleu_gtfs.sqlite")
+        db_path = os.path.join(cache_dir, f"{name}.sqlite")
         if zip_path is not None:
             if not os.path.exists(db_path) or os.path.getmtime(db_path) < os.path.getmtime(zip_path):
-                build_database(zip_path, db_path)
+                build_database(zip_path, db_path, only_stations)
             return cls(db_path)
         fresh = os.path.exists(db_path) and time.time() - os.path.getmtime(db_path) < max_age
         if not fresh:
-            zip_dest = os.path.join(cache_dir, "filbleu_gtfs.zip")
+            zip_dest = os.path.join(cache_dir, f"{name}.zip")
             try:
                 download(url, zip_dest)
-                build_database(zip_dest, db_path)
+                build_database(zip_dest, db_path, only_stations)
             except OSError:
                 # Pas de réseau : on garde l'ancienne base si elle existe.
                 if not os.path.exists(db_path):
