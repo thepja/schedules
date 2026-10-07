@@ -55,7 +55,9 @@ direction, gardés dans le navigateur ; le site s'ouvre sur le premier). Un ongl
 « Trains » liste les départs SNCF (TGV, Intercités, TER) de la gare de Tours, filtrables
 par ville de destination (« Paris » couvre toutes ses gares), elles aussi en favoris.
 Les perturbations en cours (flux GTFS-RT « service alerts » Fil Bleu et SNCF) s'affichent
-en bandeau, et sur chaque passage ou train concerné. Par défaut il
+en bandeau, et sur chaque passage ou train concerné. À côté de la liste, une carte
+(Leaflet, fond OpenStreetMap) montre l'arrêt, le tracé des lignes et les véhicules en
+direct (flux GTFS-RT « vehicle positions », rafraîchi toutes les 15 s). Par défaut il
 montre le tram A à Christ Roi direction Lycée J. Monnet ; l'URL garde la sélection
 (`?stop=Christ+Roi&quai=TTR:CHRI-1T&line=A&rt=1`).
 
@@ -68,9 +70,9 @@ navigateur ──> gateway :8000 ──/api/stops──────> gtfs :8001 
 
 | Service | Rôle | Principales routes |
 |---|---|---|
-| `gtfs` | données théoriques | `/stops/search`, `/stops/resolve`, `/stops/directions`, `/scheduled`, `/routes`, `POST /trips/stop-times` |
-| `realtime` | cache des flux GTFS-RT (horaires, alertes) | `/trip-updates`, `/alerts` |
-| `departures` | fusion théorique + temps réel, sans état | `/departures?stop=…&line=…&realtime_only=…` |
+| `gtfs` | données théoriques | `/stops/search`, `/stops/resolve`, `/stops/directions`, `/stops/shapes`, `/scheduled`, `/routes`, `POST /trips/stop-times`, `POST /trips/lookup` |
+| `realtime` | cache des flux GTFS-RT (horaires, alertes, positions) | `/trip-updates`, `/alerts`, `/vehicles` |
+| `departures` | fusion théorique + temps réel, sans état | `/departures?stop=…&line=…&realtime_only=…`, `/vehicles?stop=…&line=…` |
 | `trains` | départs SNCF d'une gare (GTFS national filtré sur la gare + GTFS-RT SNCF) | `/departures` |
 | `gateway` | site statique + relais `/api/*` ; seul service exposé | `/`, `/api/health` |
 

@@ -27,6 +27,7 @@ SERVICES = {
 ROUTES = {
     "stops": ("gtfs", "/stops"),
     "departures": ("departures", "/departures"),
+    "vehicles": ("departures", "/vehicles"),
     "trains": ("trains", ""),  # /api/trains/departures, /api/trains/destinations
 }
 

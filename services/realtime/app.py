@@ -15,7 +15,8 @@ from dataclasses import asdict
 from fastapi import FastAPI, HTTPException
 
 from filbleu.alerts import SERVICE_ALERTS_URL, fetch_alerts
-from filbleu.realtime import TRIP_UPDATES_URL, fetch_trip_updates
+from filbleu.realtime import (TRIP_UPDATES_URL, VEHICLE_POSITIONS_URL, fetch_trip_updates,
+                              fetch_vehicle_positions)
 
 RT_URL = os.environ.get("FILBLEU_RT_URL", TRIP_UPDATES_URL)
 POLL_SECONDS = int(os.environ.get("FILBLEU_RT_POLL", "20"))
@@ -23,8 +24,11 @@ POLL_SECONDS = int(os.environ.get("FILBLEU_RT_POLL", "20"))
 MAX_AGE = int(os.environ.get("FILBLEU_RT_MAX_AGE", "120"))
 ALERTS_URL = os.environ.get("FILBLEU_ALERTS_URL", SERVICE_ALERTS_URL)
 ALERTS_POLL_SECONDS = 60
+VEHICLES_URL = os.environ.get("FILBLEU_VEHICLES_URL", VEHICLE_POSITIONS_URL)
+VEHICLES_POLL_SECONDS = 15
 
-state: dict = {"trip_updates": None, "fetched_at": None, "error": None, "alerts": []}
+state: dict = {"trip_updates": None, "fetched_at": None, "error": None, "alerts": [],
+               "vehicles": [], "vehicles_at": None}
 
 
 async def poll():
@@ -47,9 +51,20 @@ async def poll_alerts():
         await asyncio.sleep(ALERTS_POLL_SECONDS)
 
 
+async def poll_vehicles():
+    while True:
+        try:
+            vehicles = await asyncio.to_thread(fetch_vehicle_positions, VEHICLES_URL)
+            state.update(vehicles=vehicles, vehicles_at=time.time())
+        except Exception:
+            pass  # on garde les dernières positions connues
+        await asyncio.sleep(VEHICLES_POLL_SECONDS)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    tasks = [asyncio.create_task(poll()), asyncio.create_task(poll_alerts())]
+    tasks = [asyncio.create_task(poll()), asyncio.create_task(poll_alerts()),
+             asyncio.create_task(poll_vehicles())]
     yield
     for t in tasks:
         t.cancel()
@@ -81,3 +96,12 @@ def trip_updates():
 def alerts():
     """Alertes de perturbation en cours, avec les lignes, arrêts et courses visés."""
     return [asdict(a) for a in state["alerts"] if a.active()]
+
+
+@app.get("/vehicles")
+def vehicles():
+    """Dernières positions des véhicules (vide si elles datent de plus de 2 min)."""
+    at = state["vehicles_at"]
+    if at is None or time.time() - at > MAX_AGE:
+        return {"fetched_at": at, "vehicles": []}
+    return {"fetched_at": at, "vehicles": [asdict(v) for v in state["vehicles"]]}

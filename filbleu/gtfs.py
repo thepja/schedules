@@ -37,10 +37,13 @@ def ssl_context() -> ssl.SSLContext:
         return ssl.create_default_context()
     return ssl.create_default_context(cafile=certifi.where())
 
+# À incrémenter quand SCHEMA change : les bases existantes sont alors reconstruites.
+SCHEMA_VERSION = 2
+
 SCHEMA = """
 CREATE TABLE stops (
     stop_id TEXT PRIMARY KEY, stop_name TEXT, norm_name TEXT,
-    location_type INTEGER, parent_station TEXT
+    location_type INTEGER, parent_station TEXT, lat REAL, lon REAL
 );
 CREATE TABLE routes (
     route_id TEXT PRIMARY KEY, short_name TEXT, long_name TEXT,
@@ -48,8 +51,9 @@ CREATE TABLE routes (
 );
 CREATE TABLE trips (
     trip_id TEXT PRIMARY KEY, route_id TEXT, service_id TEXT,
-    headsign TEXT, direction_id INTEGER
+    headsign TEXT, direction_id INTEGER, shape_id TEXT
 );
+CREATE TABLE shapes (shape_id TEXT, seq INTEGER, lat REAL, lon REAL);
 CREATE TABLE calendar (
     service_id TEXT PRIMARY KEY, days TEXT, start_date TEXT, end_date TEXT
 );
@@ -65,6 +69,8 @@ INDEXES = """
 CREATE INDEX stop_times_stop ON stop_times (stop_id);
 CREATE INDEX stop_times_trip ON stop_times (trip_id, stop_sequence);
 CREATE INDEX calendar_dates_date ON calendar_dates (date);
+CREATE INDEX shapes_shape ON shapes (shape_id, seq);
+CREATE INDEX trips_route ON trips (route_id);
 """
 
 
@@ -95,6 +101,13 @@ def _rows(zf: zipfile.ZipFile, name: str):
         yield from csv.DictReader(io.TextIOWrapper(raw, encoding="utf-8-sig"))
 
 
+def _float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _int(value, default=None):
     try:
         return int(value)
@@ -123,10 +136,11 @@ def build_database(zip_path: str, db_path: str, only_stations: list[str] | None 
     with zipfile.ZipFile(zip_path) as zf:
         keep = _station_trips(zf, set(only_stations)) if only_stations else None
         db.executemany(
-            "INSERT INTO stops VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO stops VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 (r["stop_id"], r.get("stop_name", ""), normalize(r.get("stop_name", "")),
-                 _int(r.get("location_type"), 0), r.get("parent_station") or None)
+                 _int(r.get("location_type"), 0), r.get("parent_station") or None,
+                 _float(r.get("stop_lat")), _float(r.get("stop_lon")))
                 for r in _rows(zf, "stops.txt")
             ),
         )
@@ -138,13 +152,23 @@ def build_database(zip_path: str, db_path: str, only_stations: list[str] | None 
                 for r in _rows(zf, "routes.txt")
             ),
         )
+        shape_ids: set[str] = set()
+
+        def trips():
+            for r in _rows(zf, "trips.txt"):
+                if keep is None or r["trip_id"] in keep:
+                    if r.get("shape_id"):
+                        shape_ids.add(r["shape_id"])
+                    yield (r["trip_id"], r["route_id"], r["service_id"], r.get("trip_headsign", ""),
+                           _int(r.get("direction_id")), r.get("shape_id") or None)
+
+        db.executemany("INSERT INTO trips VALUES (?, ?, ?, ?, ?, ?)", trips())
         db.executemany(
-            "INSERT INTO trips VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO shapes VALUES (?, ?, ?, ?)",
             (
-                (r["trip_id"], r["route_id"], r["service_id"], r.get("trip_headsign", ""),
-                 _int(r.get("direction_id")))
-                for r in _rows(zf, "trips.txt")
-                if keep is None or r["trip_id"] in keep
+                (r["shape_id"], _int(r.get("shape_pt_sequence"), 0), _float(r["shape_pt_lat"]),
+                 _float(r["shape_pt_lon"]))
+                for r in _rows(zf, "shapes.txt") if r["shape_id"] in shape_ids
             ),
         )
         weekdays = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
@@ -181,9 +205,17 @@ def build_database(zip_path: str, db_path: str, only_stations: list[str] | None 
         "SELECT trip_id, MAX(stop_sequence) FROM stop_times GROUP BY trip_id"
     )
     db.executescript(INDEXES)
+    db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     db.commit()
     db.close()
     os.replace(tmp_path, db_path)
+
+
+def _schema_ok(db_path: str) -> bool:
+    if not os.path.exists(db_path):
+        return False
+    with sqlite3.connect(db_path) as db:
+        return db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
 
 
 def download(url: str, dest: str, timeout: int = 60) -> None:
@@ -236,18 +268,21 @@ class Gtfs:
         os.makedirs(cache_dir, exist_ok=True)
         db_path = os.path.join(cache_dir, f"{name}.sqlite")
         if zip_path is not None:
-            if not os.path.exists(db_path) or os.path.getmtime(db_path) < os.path.getmtime(zip_path):
+            if not _schema_ok(db_path) or os.path.getmtime(db_path) < os.path.getmtime(zip_path):
                 build_database(zip_path, db_path, only_stations)
             return cls(db_path)
-        fresh = os.path.exists(db_path) and time.time() - os.path.getmtime(db_path) < max_age
+        fresh = _schema_ok(db_path) and time.time() - os.path.getmtime(db_path) < max_age
         if not fresh:
             zip_dest = os.path.join(cache_dir, f"{name}.zip")
             try:
                 download(url, zip_dest)
                 build_database(zip_dest, db_path, only_stations)
             except OSError:
-                # Pas de réseau : on garde l'ancienne base si elle existe.
-                if not os.path.exists(db_path):
+                # Pas de réseau : on garde l'ancienne base, reconstruite depuis le
+                # dernier zip téléchargé si son schéma est périmé.
+                if not _schema_ok(db_path) and os.path.exists(zip_dest):
+                    build_database(zip_dest, db_path, only_stations)
+                elif not os.path.exists(db_path):
                     raise
         return cls(db_path)
 

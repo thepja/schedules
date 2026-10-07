@@ -10,6 +10,7 @@ from google.transit import gtfs_realtime_pb2
 from .gtfs import ssl_context
 
 TRIP_UPDATES_URL = "https://data.filbleu.fr/ws-tr/gtfs-rt/opendata/trip-updates"
+VEHICLE_POSITIONS_URL = "https://data.filbleu.fr/ws-tr/gtfs-rt/opendata/vehicle-positions"
 
 TripDescriptor = gtfs_realtime_pb2.TripDescriptor
 StopTimeUpdate = gtfs_realtime_pb2.TripUpdate.StopTimeUpdate
@@ -101,3 +102,44 @@ def trip_update_from_dict(data: dict) -> TripUpdate:
     data = dict(data)
     updates = [StopUpdate(**u) for u in data.pop("updates", [])]
     return TripUpdate(**data, updates=updates)
+
+
+@dataclass
+class VehiclePosition:
+    id: str
+    label: str
+    trip_id: str | None
+    lat: float
+    lon: float
+    bearing: float | None
+    timestamp: int | None
+    stopped_at: str | None  # stop_id si le véhicule est à quai
+
+
+def parse_vehicle_positions(data: bytes) -> list[VehiclePosition]:
+    feed = gtfs_realtime_pb2.FeedMessage()
+    feed.ParseFromString(data)
+    result = []
+    for entity in feed.entity:
+        if not entity.HasField("vehicle") or not entity.vehicle.HasField("position"):
+            continue
+        v = entity.vehicle
+        stopped = v.current_status == gtfs_realtime_pb2.VehiclePosition.STOPPED_AT
+        result.append(VehiclePosition(
+            id=v.vehicle.id or entity.id,
+            label=v.vehicle.label,
+            trip_id=v.trip.trip_id or None,
+            lat=v.position.latitude,
+            lon=v.position.longitude,
+            bearing=v.position.bearing if v.position.HasField("bearing") else None,
+            timestamp=v.timestamp or None,
+            stopped_at=v.stop_id if stopped and v.stop_id else None,
+        ))
+    return result
+
+
+def fetch_vehicle_positions(url: str = VEHICLE_POSITIONS_URL,
+                            timeout: int = 15) -> list[VehiclePosition]:
+    req = urllib.request.Request(url, headers={"User-Agent": "schedules-filbleu"})
+    with urllib.request.urlopen(req, timeout=timeout, context=ssl_context()) as resp:
+        return parse_vehicle_positions(resp.read())

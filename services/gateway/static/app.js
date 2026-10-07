@@ -142,6 +142,121 @@ function renderDepartures() {
   }
 }
 
+// --- Carte en direct ----------------------------------------------------------------
+
+const VEHICLES_MS = 15000;
+const TOURS = [47.394, 0.689];
+let map = null;
+let shapeLayer, stopLayer, vehicleLayer;
+const vehicleMarkers = new Map();
+let vehiclesTimer = null;
+let shapesSeq = 0;
+
+const escapeHtml = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+const hexColor = (c, fallback) => (/^[0-9a-f]{6}$/i.test(c || "") ? "#" + c : fallback);
+
+function ensureMap() {
+  if (map || !window.L) return map;
+  map = L.map("map").setView(TOURS, 13);
+  // Tuiles OpenStreetMap (sans clé) ; assombries en CSS en mode sombre.
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  }).addTo(map);
+  shapeLayer = L.layerGroup().addTo(map);
+  stopLayer = L.layerGroup().addTo(map);
+  vehicleLayer = L.layerGroup().addTo(map);
+  return map;
+}
+
+const mapStop = () => state.quai || state.stop;
+
+function mapShowStop() {
+  if (!ensureMap() || !directionsData) return;
+  stopLayer.clearLayers();
+  const pts = (directionsData.stops || []).filter((p) => p.lat != null);
+  if (pts.length) {
+    const lat = pts.reduce((a, p) => a + p.lat, 0) / pts.length;
+    const lon = pts.reduce((a, p) => a + p.lon, 0) / pts.length;
+    L.marker([lat, lon], {
+      icon: L.divIcon({ className: "", html: '<div class="stop-pin"></div>', iconSize: [16, 16] }),
+      zIndexOffset: 1000, keyboard: false,
+    }).bindTooltip(directionsData.name, { direction: "top", offset: [0, -10] }).addTo(stopLayer);
+    map.setView([lat, lon], 15);
+  }
+  mapRefreshLines();
+}
+
+async function mapRefreshLines() {
+  if (!map) return;
+  const seq = ++shapesSeq;
+  let shapes = [];
+  try { shapes = await api("stops/shapes", { q: mapStop(), line: state.line }); } catch { /* carte sans tracé */ }
+  if (seq !== shapesSeq) return;
+  shapeLayer.clearLayers();
+  for (const sh of shapes) {
+    L.polyline(sh.points, { color: hexColor(sh.color, "#0b5cab"), weight: 4, opacity: 0.55, interactive: false }).addTo(shapeLayer);
+  }
+  // Le filtre a pu changer : on repart d'une carte vide.
+  vehicleMarkers.forEach((m) => m.remove());
+  vehicleMarkers.clear();
+  loadVehicles();
+}
+
+function vehicleIcon(v) {
+  const c = hexColor(v.color, "#0b5cab");
+  const t = v.text_color ? hexColor(v.text_color, "#fff") : readableText(v.color);
+  const dir = v.bearing != null ? `<span class="dir" style="transform:rotate(${Number(v.bearing) || 0}deg)"></span>` : "";
+  return L.divIcon({
+    className: "veh-icon", iconSize: [26, 26],
+    html: `<div class="veh" style="--c:${c};--t:${t}">${dir}${escapeHtml(v.line)}</div>`,
+  });
+}
+
+function animateTo(marker, to) {
+  const from = marker.getLatLng();
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return marker.setLatLng(to);
+  const start = performance.now();
+  const step = (now) => {
+    const k = Math.min(1, (now - start) / 1500);
+    marker.setLatLng([from.lat + (to[0] - from.lat) * k, from.lng + (to[1] - from.lng) * k]);
+    if (k < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+function updateVehicles(list) {
+  const seen = new Set();
+  for (const v of list) {
+    seen.add(v.id);
+    const label = `${v.line} → ${pretty(v.headsign)}`;
+    let m = vehicleMarkers.get(v.id);
+    if (!m) {
+      m = L.marker([v.lat, v.lon], { icon: vehicleIcon(v), keyboard: false })
+        .bindTooltip(label, { direction: "top", offset: [0, -14], className: "veh-tip" }).addTo(vehicleLayer);
+      vehicleMarkers.set(v.id, m);
+    } else {
+      m.setIcon(vehicleIcon(v));
+      m.setTooltipContent(label);
+      animateTo(m, [v.lat, v.lon]);
+    }
+  }
+  for (const [id, m] of vehicleMarkers) {
+    if (!seen.has(id)) { m.remove(); vehicleMarkers.delete(id); }
+  }
+  $("map-count").textContent = list.length ? `· ${list.length} véhicule${list.length > 1 ? "s" : ""}` : "· aucun véhicule en ligne";
+}
+
+async function loadVehicles() {
+  clearTimeout(vehiclesTimer);
+  if (tab !== "bus" || !map) return;
+  try {
+    const data = await api("vehicles", { stop: mapStop(), line: state.line });
+    updateVehicles(data.vehicles);
+  } catch { /* nouvel essai au prochain tour */ }
+  vehiclesTimer = setTimeout(loadVehicles, VEHICLES_MS);
+}
+
 // --- Perturbations ---------------------------------------------------------------
 
 function renderAlerts(container, alerts) {
@@ -263,6 +378,7 @@ async function loadStop() {
   }
   renderDirections(directionsData);
   renderFavorites();
+  mapShowStop();
   await loadDepartures();
 }
 
@@ -294,6 +410,7 @@ function select(quai, line) {
   state.line = line;
   renderDirections(directionsData);
   renderFavorites();
+  mapRefreshLines();
   loadDepartures();
 }
 
@@ -526,12 +643,16 @@ function switchTab(next) {
   writeUrl();
   if (tab === "trains") {
     clearTimeout(timer);
+    clearTimeout(vehiclesTimer);
     document.title = "Trains au départ de Tours";
     loadTrains();
   } else {
     clearTimeout(trainsTimer);
-    if (busLoaded) loadDepartures();
-    else { busLoaded = true; loadStop(); }
+    if (busLoaded) {
+      loadDepartures();
+      map?.invalidateSize();  // la carte était masquée
+      loadVehicles();
+    } else { busLoaded = true; loadStop(); }
   }
 }
 
@@ -596,7 +717,8 @@ $("trains-refresh").addEventListener("click", loadTrains);
 $("tab-bus").addEventListener("click", () => switchTab("bus"));
 $("tab-trains").addEventListener("click", () => switchTab("trains"));
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) (tab === "bus" ? loadDepartures : loadTrains)();
+  if (document.hidden) return;
+  if (tab === "bus") { loadDepartures(); loadVehicles(); } else loadTrains();
 });
 setInterval(() => (tab === "bus" ? renderDepartures : renderTrains)(), 15000);  // décompte des minutes
 

@@ -179,3 +179,25 @@ async def departures(
             for d in deps
         ],
     }
+
+
+@app.get("/vehicles")
+async def vehicles(stop: str, line: list[str] | None = Query(None)):
+    """Véhicules en circulation sur les lignes de l'arrêt ``stop`` (ou sur ``line``)."""
+    directions, positions = await asyncio.gather(
+        _get("gtfs", "/stops/directions", q=stop), _get("realtime", "/vehicles"))
+    wanted = {l.lower() for l in line} if line else None
+    route_ids = {d["route_id"] for d in directions["directions"]
+                 if wanted is None or d["line"].lower() in wanted}
+    trip_ids = sorted({v["trip_id"] for v in positions["vehicles"] if v["trip_id"]})
+    trips = {}
+    if trip_ids and route_ids:
+        resp = await request(clients["gtfs"], "POST", "/trips/lookup", json={"trip_ids": trip_ids})
+        resp.raise_for_status()
+        trips = resp.json()
+    result = []
+    for v in positions["vehicles"]:
+        trip = trips.get(v["trip_id"] or "")
+        if trip and trip["route_id"] in route_ids:
+            result.append({**v, **{k: trip[k] for k in ("line", "color", "text_color", "headsign")}})
+    return {"fetched_at": positions["fetched_at"], "vehicles": result}

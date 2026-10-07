@@ -180,3 +180,30 @@ def test_build_database_only_stations(tmp_path):
     assert [r[0] for r in gtfs.db.execute("SELECT trip_id FROM trips")] == ["T3"]
     # Les courses gardées le sont en entier (destination, propagation des retards).
     assert len(gtfs.trip_stop_times("T3")) == 3
+
+
+def test_vehicle_positions():
+    from filbleu.realtime import parse_vehicle_positions
+    feed = gtfs_realtime_pb2.FeedMessage()
+    feed.header.gtfs_realtime_version = "2.0"
+    v = feed.entity.add(id="1").vehicle
+    v.trip.trip_id = "T1"
+    v.vehicle.id, v.vehicle.label = "VEH:1", "505"
+    v.position.latitude, v.position.longitude, v.position.bearing = 47.4, 0.68, 90
+    v.current_status = gtfs_realtime_pb2.VehiclePosition.STOPPED_AT
+    v.stop_id = "JJ_A"
+    feed.entity.add(id="2").vehicle.vehicle.id = "sans position"
+    (pos,) = parse_vehicle_positions(feed.SerializeToString())
+    assert (pos.id, pos.trip_id, pos.bearing, pos.stopped_at) == ("VEH:1", "T1", 90, "JJ_A")
+    assert abs(pos.lat - 47.4) < 1e-5  # float 32 bits dans le protobuf
+
+
+def test_outdated_schema_is_rebuilt(tmp_path, gtfs):
+    import sqlite3
+    db_path = tmp_path / "cache" / "filbleu_gtfs.sqlite"
+    with sqlite3.connect(db_path) as db:
+        db.execute("PRAGMA user_version = 1")
+    zip_path = tmp_path / "gtfs.zip"
+    rebuilt = Gtfs.load(str(tmp_path / "cache"), zip_path=str(zip_path))
+    assert rebuilt.db.execute("PRAGMA user_version").fetchone()[0] >= 2
+    assert rebuilt.db.execute("SELECT lat FROM stops LIMIT 1").fetchone() is not None

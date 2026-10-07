@@ -215,6 +215,52 @@ h1 { font-size: 1.6rem; margin: 0; letter-spacing: -.02em; }
   .search { width: 280px; }
 }
 
+/* Carte en direct, à côté de la liste */
+.bus-layout { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-areas: "head" "map" "list"; }
+.bus-head { grid-area: head; min-width: 0; }
+.bus-list { grid-area: list; min-width: 0; }
+.map-panel { grid-area: map; margin-bottom: 14px; }
+.map {
+  height: 280px; border-radius: 12px; border: 1px solid var(--border); overflow: hidden;
+  background: var(--surface); box-shadow: var(--shadow);
+}
+.map-legend { margin: 6px 2px 0; font-size: .8rem; display: flex; gap: 8px; }
+.leaflet-container { font: inherit; }
+.leaflet-tooltip { font-size: .8rem; font-weight: 600; }
+.veh-tip { text-transform: capitalize; }
+@media (prefers-color-scheme: dark) {
+  .map .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.6); }
+  .map .leaflet-control-attribution { background: rgba(23, 32, 42, .85); color: var(--muted); }
+}
+
+@media (min-width: 960px) {
+  .wrap { max-width: 1180px; }
+  #view-trains { max-width: 720px; }
+  .bus-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); grid-template-rows: auto 1fr;
+    grid-template-areas: "head map" "list map"; column-gap: 24px;
+  }
+  .map-panel { position: sticky; top: 132px; align-self: start; margin-top: 22px; }
+  .map { height: calc(100vh - 190px); min-height: 420px; }
+}
+
+/* Marqueurs */
+.veh-icon { background: none; border: 0; }
+.veh {
+  position: relative; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--c, #0b5cab); color: var(--t, #fff); font-size: 11px; font-weight: 800;
+  border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, .35); box-sizing: border-box;
+}
+.veh .dir { position: absolute; inset: -9px; pointer-events: none; }
+.veh .dir::before {
+  content: ""; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+  border: 5px solid transparent; border-top: 0; border-bottom: 7px solid var(--c, #0b5cab);
+}
+.stop-pin {
+  width: 16px; height: 16px; border-radius: 50%; background: #fff; border: 4px solid var(--text);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, .6), 0 1px 4px rgba(0, 0, 0, .4); box-sizing: border-box;
+}
+
 /* Après les règles de l'en-tête : les onglets restent en ligne, les noms de gares tels quels. */
 .top .tabs { flex-direction: row; gap: 4px; }
 .train .dest { text-transform: none; }
