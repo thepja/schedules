@@ -71,6 +71,37 @@ h1 { font-size: 1.6rem; margin: 0; letter-spacing: -.02em; }
 .toggle input:checked + .track::after { transform: translateX(16px); }
 .toggle input:focus-visible + .track { box-shadow: 0 0 0 3px var(--accent-soft); }
 
+/* Favoris */
+.favorites[hidden] { display: none; }
+.favorites { display: flex; gap: 8px; overflow-x: auto; padding: 16px 0 4px; scrollbar-width: thin; }
+.fav {
+  flex: none; display: inline-flex; align-items: center; border: 1px solid var(--border);
+  border-radius: 10px; background: var(--surface); box-shadow: var(--shadow); max-width: 260px;
+}
+.fav.current { border-color: var(--accent); background: var(--accent-soft); }
+.fav-open {
+  display: inline-flex; align-items: center; gap: 8px; padding: 6px 4px 6px 8px; min-width: 0;
+  font: inherit; color: var(--text); background: none; border: 0; cursor: pointer; text-align: left;
+}
+.fav-open .badge { min-width: 24px; height: 22px; font-size: .8rem; }
+.fav-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+.fav-text strong { font-size: .88rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fav-text small { font-size: .75rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fav-text small.cap { text-transform: capitalize; }
+.fav-remove {
+  flex: none; width: 28px; align-self: stretch; font: inherit; font-size: 1.1rem; line-height: 1;
+  color: var(--muted); background: none; border: 0; border-radius: 0 10px 10px 0; cursor: pointer;
+}
+.fav-remove:hover { color: var(--danger); }
+
+.title { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.star {
+  flex: none; width: 36px; height: 36px; font-size: 1.4rem; line-height: 1; color: var(--muted);
+  background: none; border: 1px solid transparent; border-radius: 50%; cursor: pointer;
+}
+.star:hover { border-color: var(--border); }
+.star[aria-pressed="true"] { color: #f5a400; }
+
 /* Directions */
 .directions { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 14px; scrollbar-width: thin; }
 .chip {

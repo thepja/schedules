@@ -7,14 +7,21 @@ const WAKE_RETRY_MS = 5000;
 const WAKE_STATUSES = [502, 503, 504];
 const WAKE_MESSAGE = "Démarrage des services… (jusqu'à 1 min après une période d'inactivité)";
 
+const FAVORITES_KEY = "filbleu.favorites";
+
 const $ = (id) => document.getElementById(id);
+let favorites = loadFavorites();
 const state = readUrl();
 let lastData = null;
 let timer = null;
 
 function readUrl() {
   const p = new URLSearchParams(location.search);
-  if (!p.has("stop")) return { ...DEFAULTS };
+  if (!p.has("stop")) {
+    // Sans paramètres : premier favori, sinon le trajet par défaut.
+    const f = favorites[0];
+    return f ? { stop: f.stop, quai: f.quai, line: f.line, rt: DEFAULTS.rt } : { ...DEFAULTS };
+  }
   return { stop: p.get("stop"), quai: p.get("quai") || "", line: p.get("line") || "", rt: p.get("rt") || "" };
 }
 
@@ -136,6 +143,77 @@ function showNotice(text, isError = false) {
   n.classList.toggle("error", isError);
 }
 
+// --- Favoris (stockés dans le navigateur) ------------------------------------------
+
+function loadFavorites() {
+  try {
+    const list = JSON.parse(localStorage.getItem(FAVORITES_KEY) || "[]");
+    return Array.isArray(list) ? list.filter((f) => f && f.stop) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveFavorites() {
+  try { localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites)); } catch { /* stockage indisponible */ }
+}
+
+const sameFavorite = (f, s) => f.stop === s.stop && (f.quai || "") === (s.quai || "") && (f.line || "") === (s.line || "");
+const currentFavorite = () => favorites.find((f) => sameFavorite(f, state));
+
+function currentDirection() {
+  return directionsData?.directions.find((d) => d.stop_id === state.quai && (!state.line || d.line === state.line));
+}
+
+function toggleFavorite() {
+  const existing = currentFavorite();
+  if (existing) {
+    favorites = favorites.filter((f) => f !== existing);
+  } else {
+    const d = currentDirection();
+    favorites.push({
+      stop: state.stop,
+      quai: state.quai,
+      line: state.line,
+      color: d?.color || "",
+      text_color: d?.text_color || "",
+      direction: d ? d.headsigns.slice(0, 2).map(pretty).join(" / ") : "",
+    });
+  }
+  saveFavorites();
+  renderFavorites();
+}
+
+function openFavorite(f) {
+  const sameStop = f.stop === state.stop && directionsData;
+  Object.assign(state, { stop: f.stop, quai: f.quai, line: f.line });
+  if (sameStop) select(f.quai, f.line);
+  else renderFavorites();
+loadStop();
+  renderFavorites();
+}
+
+function renderFavorites() {
+  const nav = $("favorites");
+  nav.hidden = !favorites.length;
+  nav.replaceChildren(...favorites.map((f) => {
+    const subtitle = f.direction ? "→ " + f.direction : f.line ? "Ligne " + f.line : "Toutes directions";
+    return el("div", { class: "fav" + (sameFavorite(f, state) ? " current" : "") },
+      el("button", { class: "fav-open", type: "button", onclick: () => openFavorite(f) },
+        f.line ? badge(f.line, f.color, f.text_color) : null,
+        el("span", { class: "fav-text" }, el("strong", {}, f.stop), el("small", { class: f.direction ? "cap" : "" }, subtitle))),
+      el("button", {
+        class: "fav-remove", type: "button", title: "Retirer des favoris", "aria-label": `Retirer ${f.stop} des favoris`,
+        onclick: () => { favorites = favorites.filter((x) => x !== f); saveFavorites(); renderFavorites(); },
+      }, "×"));
+  }));
+  const isFav = !!currentFavorite();
+  const star = $("fav-toggle");
+  star.textContent = isFav ? "★" : "☆";
+  star.setAttribute("aria-pressed", String(isFav));
+  star.title = isFav ? "Retirer des favoris" : "Ajouter aux favoris";
+}
+
 // --- Chargement ----------------------------------------------------------------
 
 let directionsData = null;
@@ -157,6 +235,7 @@ async function loadStop() {
     }
   }
   renderDirections(directionsData);
+  renderFavorites();
   await loadDepartures();
 }
 
@@ -185,6 +264,7 @@ function select(quai, line) {
   state.quai = quai;
   state.line = line;
   renderDirections(directionsData);
+  renderFavorites();
   loadDepartures();
 }
 
@@ -239,6 +319,9 @@ input.addEventListener("blur", () => setTimeout(closeSuggestions, 100));
 
 $("rt-only").addEventListener("change", (e) => { state.rt = e.target.checked ? "1" : ""; loadDepartures(); });
 $("refresh").addEventListener("click", loadDepartures);
+$("fav-toggle").addEventListener("click", toggleFavorite);
+// Favoris modifiés dans un autre onglet.
+window.addEventListener("storage", (e) => { if (e.key === FAVORITES_KEY) { favorites = loadFavorites(); renderFavorites(); } });
 document.addEventListener("visibilitychange", () => { if (!document.hidden) loadDepartures(); });
 setInterval(renderDepartures, 15000);  // décompte des minutes entre deux actualisations
 

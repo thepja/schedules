@@ -50,7 +50,8 @@ Les URLs peuvent être surchargées via `--gtfs-url` / `--rt-url` (ou les variab
 ### Site web (micro-services)
 
 Un site affiche les prochains passages, rafraîchis toutes les 20 s, avec recherche
-d'arrêt, choix de la direction et filtre « temps réel uniquement ». Par défaut il
+d'arrêt, choix de la direction, filtre « temps réel uniquement » et favoris (arrêt +
+direction, gardés dans le navigateur ; le site s'ouvre sur le premier). Par défaut il
 montre le tram A à Christ Roi direction Lycée J. Monnet ; l'URL garde la sélection
 (`?stop=Christ+Roi&quai=TTR:CHRI-1T&line=A&rt=1`).
 
