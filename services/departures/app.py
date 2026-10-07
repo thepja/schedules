@@ -16,13 +16,14 @@ from fastapi import FastAPI, HTTPException, Query
 from filbleu.departures import LATE_MARGIN, next_departures, trip_key
 from filbleu.gtfs import TIMEZONE, ScheduledStop
 from filbleu.realtime import trip_update_from_dict
+from services.http import request
 
 GTFS_SERVICE = os.environ.get("GTFS_SERVICE_URL", "http://localhost:8001")
 REALTIME_SERVICE = os.environ.get("REALTIME_SERVICE_URL", "http://localhost:8002")
 
 app = FastAPI(title="filbleu-departures")
 clients = {
-    "gtfs": httpx.AsyncClient(base_url=GTFS_SERVICE, timeout=10),
+    "gtfs": httpx.AsyncClient(base_url=GTFS_SERVICE, timeout=30),
     "realtime": httpx.AsyncClient(base_url=REALTIME_SERVICE, timeout=5),
 }
 routes_cache: dict[str, dict] = {}
@@ -49,7 +50,7 @@ class PrefetchedGtfs:
 
 async def _get(client: str, path: str, **params):
     try:
-        resp = await clients[client].get(path, params=params)
+        resp = await request(clients[client], "GET", path, params=params)
     except httpx.HTTPError as e:
         raise HTTPException(502, f"Service {client} injoignable : {e}")
     if resp.status_code == 404:
@@ -109,7 +110,8 @@ async def departures(
         live = {trip_key(t) for t in updates}
         tracked = sorted({s.trip_id for s in scheduled if trip_key(s.trip_id) in live})
         if tracked:
-            resp = await clients["gtfs"].post("/trips/stop-times", json={"trip_ids": tracked})
+            resp = await request(clients["gtfs"], "POST", "/trips/stop-times",
+                                 json={"trip_ids": tracked})
             resp.raise_for_status()
             trip_times = resp.json()
 

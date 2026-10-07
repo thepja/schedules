@@ -3,6 +3,9 @@
 // Par défaut : tram A à Christ Roi direction Lycée J. Monnet, en temps réel.
 const DEFAULTS = { stop: "Christ Roi", quai: "TTR:CHRI-1T", line: "A", rt: "1" };
 const REFRESH_MS = 20000;
+const WAKE_RETRY_MS = 5000;
+const WAKE_STATUSES = [502, 503, 504];
+const WAKE_MESSAGE = "Démarrage des services… (jusqu'à 1 min après une période d'inactivité)";
 
 const $ = (id) => document.getElementById(id);
 const state = readUrl();
@@ -24,8 +27,14 @@ function writeUrl() {
 async function api(path, params) {
   const url = new URL("api/" + path, location.href);
   for (const [k, v] of Object.entries(params)) if (v !== "" && v != null) url.searchParams.append(k, v);
-  const resp = await fetch(url);
+  let resp;
+  try {
+    resp = await fetch(url);
+  } catch {
+    throw Object.assign(new Error(WAKE_MESSAGE), { waking: true });
+  }
   const body = await resp.json().catch(() => ({}));
+  if (WAKE_STATUSES.includes(resp.status)) throw Object.assign(new Error(WAKE_MESSAGE), { waking: true });
   if (!resp.ok) throw new Error(body.detail || `Erreur ${resp.status}`);
   return body;
 }
@@ -141,7 +150,11 @@ async function loadStop() {
     document.title = `${directionsData.name} — Fil Bleu`;
   } catch (e) {
     directionsData = null;
-    showNotice(e.message, true);
+    showNotice(e.message, !e.waking);
+    if (e.waking) {
+      setTimeout(loadStop, WAKE_RETRY_MS);
+      return;
+    }
   }
   renderDirections(directionsData);
   await loadDepartures();
@@ -150,6 +163,7 @@ async function loadStop() {
 async function loadDepartures() {
   clearTimeout(timer);
   writeUrl();
+  let delay = REFRESH_MS;
   try {
     lastData = await api("departures", {
       stop: state.quai || state.stop,
@@ -160,10 +174,11 @@ async function loadDepartures() {
     showNotice(lastData.realtime_available ? "" : "Temps réel indisponible : horaires prévus uniquement.");
     $("updated").textContent = "Mis à jour à " + hhmm(new Date());
   } catch (e) {
-    showNotice(e.message, true);
+    showNotice(e.message, !e.waking);
+    if (e.waking) delay = WAKE_RETRY_MS;
   }
   renderDepartures();
-  timer = setTimeout(loadDepartures, REFRESH_MS);
+  timer = setTimeout(loadDepartures, delay);
 }
 
 function select(quai, line) {
