@@ -30,6 +30,8 @@
 }
 
 * { box-sizing: border-box; }
+/* L'attribut hidden l'emporte sur les display: flex / grid définis plus bas. */
+[hidden] { display: none !important; }
 body {
   margin: 0;
   background: var(--bg);
