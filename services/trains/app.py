@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 
 from fastapi import FastAPI, Query
 
+from filbleu.alerts import fetch_alerts, public
 from filbleu.departures import next_departures
 from filbleu.gtfs import DEFAULT_MAX_AGE, TIMEZONE, Gtfs, normalize
 from filbleu.realtime import fetch_trip_updates
@@ -28,11 +29,21 @@ CACHE_DIR = os.environ.get("FILBLEU_CACHE", ".cache")
 GTFS_ZIP = os.environ.get("SNCF_GTFS_ZIP")  # GTFS local (tests, hors ligne)
 POLL_SECONDS = int(os.environ.get("SNCF_RT_POLL", "30"))
 RT_MAX_AGE = 180
+ALERTS_URL = os.environ.get(
+    "SNCF_ALERTS_URL", "https://proxy.transport.data.gouv.fr/resource/sncf-gtfs-rt-service-alerts")
+ALERTS_POLL_SECONDS = 120
 
 # « StopPoint:OCETGV INOUI-87571000 » -> « TGV INOUI »
 MODE = re.compile(r"^StopPoint:OCE(.+)-\d+$")
+# Les alertes citent « OCESN860594F », début du trip_id GTFS « OCESN860594F1187_F:… ».
+TRAIN_KEY = re.compile(r"^OCESN\d+F")
 
-state: dict = {"gtfs": None, "updates": None, "fetched_at": None, "error": None}
+state: dict = {"gtfs": None, "updates": None, "fetched_at": None, "error": None, "alerts": []}
+
+
+def train_key(trip_id: str) -> str:
+    m = TRAIN_KEY.match(trip_id)
+    return m.group(0) if m else trip_id
 
 
 def load_gtfs() -> Gtfs:
@@ -49,6 +60,15 @@ async def refresh_gtfs():
             pass  # on garde la version précédente
 
 
+async def poll_alerts():
+    while True:
+        try:
+            state["alerts"] = await asyncio.to_thread(fetch_alerts, ALERTS_URL)
+        except Exception:
+            pass  # on garde les dernières alertes connues
+        await asyncio.sleep(ALERTS_POLL_SECONDS)
+
+
 async def poll_realtime():
     while True:
         try:
@@ -62,7 +82,8 @@ async def poll_realtime():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     state["gtfs"] = await asyncio.to_thread(load_gtfs)
-    tasks = [asyncio.create_task(refresh_gtfs()), asyncio.create_task(poll_realtime())]
+    tasks = [asyncio.create_task(refresh_gtfs()), asyncio.create_task(poll_realtime()),
+             asyncio.create_task(poll_alerts())]
     yield
     for t in tasks:
         t.cancel()
@@ -174,10 +195,31 @@ def departures(
         })
         if len(result) >= limit:
             break
+
+    # Alertes : celles de la gare et celles des trains affichés, sans doublons
+    # (la SNCF répète la même alerte pour chaque train concerné).
+    station_ids = set(station_stop_ids(gtfs)) | {STATION}
+    shown = {train_key(d["trip_id"]): d for d in result}
+    alerts, canonical = [], {}
+    for a in state["alerts"]:
+        trains = {train_key(t) for t in a.trip_ids} & shown.keys()
+        if not a.active() or not (trains or station_ids.intersection(a.stop_ids)):
+            continue
+        key = (a.header, a.description)
+        if key not in canonical:
+            canonical[key] = a.id
+            alerts.append(public(a))
+        for t in trains:
+            ids = shown[t].setdefault("alert_ids", [])
+            if canonical[key] not in ids:
+                ids.append(canonical[key])
+    for d in result:
+        d.setdefault("alert_ids", [])
     return {
         "station": station.name if station else STATION,
         "to": to,
         "generated_at": now.isoformat(),
         "realtime_available": updates is not None,
+        "alerts": alerts,
         "departures": result,
     }

@@ -75,7 +75,10 @@ def _resolve(q: str) -> tuple[str, list[str]]:
 @app.get("/stops/resolve")
 def resolve_stop(q: str):
     name, stop_ids = _resolve(q)
-    return {"name": name, "stop_ids": stop_ids}
+    parents = [r[0] for r in gtfs().db.execute(
+        f"SELECT DISTINCT parent_station FROM stops WHERE stop_id IN ({','.join('?' * len(stop_ids))}) "
+        "AND parent_station IS NOT NULL", stop_ids)]
+    return {"name": name, "stop_ids": stop_ids, "parent_ids": parents}
 
 
 @app.get("/stops/directions")

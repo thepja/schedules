@@ -13,6 +13,7 @@ from datetime import date, datetime, timedelta
 import httpx
 from fastapi import FastAPI, HTTPException, Query
 
+from filbleu.alerts import Alert, public
 from filbleu.departures import LATE_MARGIN, next_departures, trip_key
 from filbleu.gtfs import TIMEZONE, ScheduledStop
 from filbleu.realtime import trip_update_from_dict
@@ -77,6 +78,25 @@ async def _trip_updates() -> dict | None:
     return {tu["trip_id"]: trip_update_from_dict(tu) for tu in resp.json()["trip_updates"]}
 
 
+async def _alerts() -> list[Alert]:
+    """Alertes en cours ; liste vide si le service temps réel ne répond pas."""
+    try:
+        resp = await clients["realtime"].get("/alerts")
+    except httpx.HTTPError:
+        return []
+    return [Alert(**a) for a in resp.json()] if resp.status_code == 200 else []
+
+
+def relevant_alerts(alerts: list[Alert], stop_ids: set[str], route_ids: set[str],
+                    trip_keys: set[str]) -> list[Alert]:
+    """Alertes visant tout le réseau, un des arrêts, une des lignes ou une des courses."""
+    return [
+        a for a in alerts
+        if a.network_wide or stop_ids.intersection(a.stop_ids) or route_ids.intersection(a.route_ids)
+        or trip_keys.intersection(trip_key(t) for t in a.trip_ids)
+    ]
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -93,8 +113,8 @@ async def departures(
     """Prochains passages à ``stop`` (nom d'arrêt ou stop_id d'un quai)."""
     now = datetime.now(TIMEZONE)
     end = now + timedelta(minutes=horizon)
-    resolved, updates, routes = await asyncio.gather(
-        _get("gtfs", "/stops/resolve", q=stop), _trip_updates(), _routes())
+    resolved, updates, routes, alerts = await asyncio.gather(
+        _get("gtfs", "/stops/resolve", q=stop), _trip_updates(), _routes(), _alerts())
     rows = await _get("gtfs", "/scheduled", stop_id=resolved["stop_ids"],
                       start=(now - LATE_MARGIN).isoformat(), end=end.isoformat())
     scheduled = [
@@ -120,11 +140,28 @@ async def departures(
         now=now, limit=limit, horizon=timedelta(minutes=horizon),
         lines={l.lower() for l in line} if line else None, realtime_only=realtime_only,
     )
+
+    def shown(route_id):
+        r = routes.get(route_id)
+        name = (r["short_name"] or r["long_name"]) if r else route_id
+        return not line or (name or "").lower() in {l.lower() for l in line}
+
+    alerts = relevant_alerts(
+        alerts,
+        set(resolved["stop_ids"]) | set(resolved.get("parent_ids", [])),
+        {s.route_id for s in scheduled if shown(s.route_id)},
+        {trip_key(s.trip_id) for s in scheduled if shown(s.route_id)},
+    )
+    trip_alerts = {}
+    for a in alerts:
+        for t in a.trip_ids:
+            trip_alerts.setdefault(trip_key(t), []).append(a.id)
     return {
         "stop_name": resolved["name"],
         "stop_ids": resolved["stop_ids"],
         "generated_at": now.isoformat(),
         "realtime_available": updates is not None,
+        "alerts": [public(a) for a in alerts],
         "departures": [
             {
                 "line": d.line,
@@ -137,6 +174,7 @@ async def departures(
                 "delay_seconds": int(d.delay.total_seconds()) if d.delay is not None else None,
                 "realtime": d.realtime,
                 "canceled": d.canceled,
+                "alert_ids": trip_alerts.get(trip_key(d.trip_id), []),
             }
             for d in deps
         ],

@@ -28,7 +28,8 @@ def client(gtfs, monkeypatch):
         "gtfs": httpx.AsyncClient(transport=httpx.ASGITransport(app=gtfs_service.app),
                                   base_url="http://gtfs"),
         "realtime": httpx.AsyncClient(transport=httpx.MockTransport(
-            lambda request: httpx.Response(200, json=feed)), base_url="http://realtime"),
+            lambda request: httpx.Response(200, json=feed if request.url.path == "/trip-updates" else [])),
+            base_url="http://realtime"),
     })
     monkeypatch.setattr(departures, "routes_cache", {})
     return TestClient(departures.app)

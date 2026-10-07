@@ -1,4 +1,5 @@
-"""Service temps réel : interroge le flux GTFS-RT Fil Bleu et garde la dernière version.
+"""Service temps réel : interroge les flux GTFS-RT Fil Bleu (horaires et alertes de
+perturbation) et garde leur dernière version.
 
 Les autres services lisent ce cache plutôt que de solliciter le flux à chaque requête.
 """
@@ -13,14 +14,17 @@ from dataclasses import asdict
 
 from fastapi import FastAPI, HTTPException
 
+from filbleu.alerts import SERVICE_ALERTS_URL, fetch_alerts
 from filbleu.realtime import TRIP_UPDATES_URL, fetch_trip_updates
 
 RT_URL = os.environ.get("FILBLEU_RT_URL", TRIP_UPDATES_URL)
 POLL_SECONDS = int(os.environ.get("FILBLEU_RT_POLL", "20"))
 # Au-delà, les données sont trop anciennes pour être présentées comme du temps réel.
 MAX_AGE = int(os.environ.get("FILBLEU_RT_MAX_AGE", "120"))
+ALERTS_URL = os.environ.get("FILBLEU_ALERTS_URL", SERVICE_ALERTS_URL)
+ALERTS_POLL_SECONDS = 60
 
-state: dict = {"trip_updates": None, "fetched_at": None, "error": None}
+state: dict = {"trip_updates": None, "fetched_at": None, "error": None, "alerts": []}
 
 
 async def poll():
@@ -34,11 +38,21 @@ async def poll():
         await asyncio.sleep(POLL_SECONDS)
 
 
+async def poll_alerts():
+    while True:
+        try:
+            state["alerts"] = await asyncio.to_thread(fetch_alerts, ALERTS_URL)
+        except Exception:
+            pass  # on garde les dernières alertes connues
+        await asyncio.sleep(ALERTS_POLL_SECONDS)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    task = asyncio.create_task(poll())
+    tasks = [asyncio.create_task(poll()), asyncio.create_task(poll_alerts())]
     yield
-    task.cancel()
+    for t in tasks:
+        t.cancel()
 
 
 app = FastAPI(title="filbleu-realtime", lifespan=lifespan)
@@ -61,3 +75,9 @@ def trip_updates():
     if age is None or age > MAX_AGE:
         raise HTTPException(503, state["error"] or "Flux temps réel pas encore reçu")
     return {"fetched_at": state["fetched_at"], "trip_updates": state["trip_updates"]}
+
+
+@app.get("/alerts")
+def alerts():
+    """Alertes de perturbation en cours, avec les lignes, arrêts et courses visés."""
+    return [asdict(a) for a in state["alerts"] if a.active()]

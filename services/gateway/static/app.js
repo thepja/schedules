@@ -131,6 +131,7 @@ function renderDepartures() {
       const delay = Math.round((d.delay_seconds || 0) / 60);
       if (delay) meta.push(el("span", { class: "late" }, (delay > 0 ? "+" : "−") + Math.abs(delay) + " min"));
     } else meta.push(el("span", {}, "horaire prévu"));
+    meta.push(alertTag(d, lastData.alerts));
 
     list.append(el("li", { class: "dep" + (d.canceled ? " canceled" : d.realtime ? "" : " scheduled") },
       badge(d.line, d.line_color),
@@ -139,6 +140,28 @@ function renderDepartures() {
         el("div", { class: "meta" }, ...meta)),
       el("div", { class: "when" }, when)));
   }
+}
+
+// --- Perturbations ---------------------------------------------------------------
+
+function renderAlerts(container, alerts) {
+  container.replaceChildren(...(alerts || []).map((a) => {
+    const link = /^https?:\/\//i.test(a.url || "")
+      ? el("a", { href: a.url, target: "_blank", rel: "noopener noreferrer" }, "En savoir plus") : null;
+    const body = a.description && a.description !== a.header ? el("p", {}, a.description) : null;
+    return el("details", { class: "alert " + (a.severity || "") },
+      el("summary", {}, el("span", {}, a.header || a.effect || "Perturbation"),
+        a.effect ? el("span", { class: "effect" }, a.effect) : null),
+      body, link);
+  }));
+}
+
+function alertTag(d, alerts) {
+  if (!d.alert_ids?.length) return null;
+  const first = (alerts || []).find((a) => d.alert_ids.includes(a.id));
+  const icon = first?.severity === "info" ? "ℹ " : "⚠ ";
+  return el("span", { class: "alert-tag " + (first?.severity || ""), title: first?.header || "" },
+    icon + (first?.header || "Perturbation"));
 }
 
 function showNotice(text, isError = false) {
@@ -261,6 +284,7 @@ async function loadDepartures() {
     showNotice(e.message, !e.waking);
     if (e.waking) delay = WAKE_RETRY_MS;
   }
+  renderAlerts($("alerts"), lastData?.alerts);
   renderDepartures();
   timer = setTimeout(loadDepartures, delay);
 }
@@ -394,6 +418,7 @@ function renderTrains() {
       el("div", { style: "min-width:0" },
         el("div", { class: "dest" }, d.destination || "—"),
         el("div", { class: "meta" }, label ? el("span", { class: "mode " + modeClass(d.mode) }, label) : null,
+          alertTag(d, trainsData.alerts),
           d.arrival
             ? el("span", { class: "arrival" }, `arrivée ${hhmm(new Date(d.arrival))}` +
                 (norm(d.arrival_stop) !== norm(d.destination) && norm(d.arrival_stop) !== norm(trainTo)
@@ -418,6 +443,7 @@ async function loadTrains() {
     showTrainsNotice(e.message, !e.waking);
     if (e.waking) delay = WAKE_RETRY_MS;
   }
+  renderAlerts($("trains-alerts"), trainsData?.alerts);
   renderTrains();
   trainsTimer = setTimeout(loadTrains, delay);
 }
