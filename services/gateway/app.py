@@ -27,7 +27,7 @@ SERVICES = {
 ROUTES = {
     "stops": ("gtfs", "/stops"),
     "departures": ("departures", "/departures"),
-    "trains": ("trains", "/departures"),
+    "trains": ("trains", ""),  # /api/trains/departures, /api/trains/destinations
 }
 
 client = httpx.AsyncClient(timeout=60)

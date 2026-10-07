@@ -29,7 +29,10 @@ function readUrl() {
 function writeUrl() {
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(state)) if (v) p.set(k, v);
-  if (tab === "trains") p.set("tab", "trains");
+  if (tab === "trains") {
+    p.set("tab", "trains");
+    if (trainTo) p.set("to", trainTo);
+  }
   history.replaceState(null, "", "?" + p);
 }
 
@@ -274,6 +277,75 @@ function select(quai, line) {
 
 let trainsData = null;
 let trainsTimer = null;
+let trainTo = new URLSearchParams(location.search).get("to") || "";
+const TRAIN_FAVORITES_KEY = "filbleu.trainDestinations";
+let trainFavorites = loadTrainFavorites();
+let destinations = null;  // gares desservies, chargées à la première recherche
+
+function loadTrainFavorites() {
+  try {
+    const list = JSON.parse(localStorage.getItem(TRAIN_FAVORITES_KEY) || "[]");
+    return Array.isArray(list) ? list.filter((x) => typeof x === "string" && x) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveTrainFavorites() {
+  try { localStorage.setItem(TRAIN_FAVORITES_KEY, JSON.stringify(trainFavorites)); } catch { /* stockage indisponible */ }
+}
+
+const norm = (s) => (s || "").normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
+// Même règle que le service : « Paris » couvre « Paris Austerlitz », « Paris Montparnasse… ».
+const cityMatch = (q, name) => { const a = norm(q), b = norm(name); return b === a || b.startsWith(a + " ") || b.startsWith(a + "-"); };
+const isTrainFavorite = (to) => trainFavorites.some((f) => norm(f) === norm(to));
+
+function setTrainTo(to) {
+  trainTo = to;
+  renderTrainDestinations();
+  trainsData = null;
+  renderTrains();
+  loadTrains();
+}
+
+function toggleTrainFavorite() {
+  if (!trainTo) return;
+  trainFavorites = isTrainFavorite(trainTo)
+    ? trainFavorites.filter((f) => norm(f) !== norm(trainTo))
+    : [...trainFavorites, trainTo];
+  saveTrainFavorites();
+  renderTrainDestinations();
+}
+
+function renderTrainDestinations() {
+  $("to-title").hidden = !trainTo;
+  $("to-title").textContent = trainTo ? "→ " + trainTo : "";
+  const star = $("to-fav");
+  star.hidden = !trainTo;
+  const fav = isTrainFavorite(trainTo);
+  star.textContent = fav ? "★" : "☆";
+  star.setAttribute("aria-pressed", String(fav));
+  star.title = fav ? "Retirer la destination des favoris" : "Ajouter la destination aux favoris";
+
+  const nav = $("to-chips");
+  nav.replaceChildren();
+  if (!trainFavorites.length && !trainTo) return;
+  nav.append(el("button", { class: "chip all", type: "button", "aria-pressed": String(!trainTo), onclick: () => setTrainTo("") },
+    "Toutes destinations"));
+  for (const f of trainFavorites) {
+    nav.append(el("button", { class: "chip all", type: "button", "aria-pressed": String(norm(f) === norm(trainTo)), onclick: () => setTrainTo(f) },
+      "★ " + f,
+      el("span", {
+        class: "x", role: "button", title: "Retirer des favoris", "aria-label": `Retirer ${f} des favoris`,
+        onclick: (e) => {
+          e.stopPropagation();
+          trainFavorites = trainFavorites.filter((x) => x !== f);
+          saveTrainFavorites();
+          renderTrainDestinations();
+        },
+      }, " ×")));
+  }
+}
 
 function showTrainsNotice(text, isError = false) {
   const n = $("trains-notice");
@@ -294,7 +366,9 @@ function renderTrains() {
   const now = Date.now();
   const deps = trainsData.departures.filter((d) => new Date(d.expected).getTime() >= now - 60000);
   if (!deps.length) {
-    list.append(el("li", { class: "empty" }, "Aucun départ dans les 4 prochaines heures."));
+    list.append(el("li", { class: "empty" }, trainTo
+      ? `Aucun train vers ${trainTo} dans les 16 prochaines heures.`
+      : "Aucun départ dans les 4 prochaines heures."));
     return;
   }
   for (const d of deps) {
@@ -302,10 +376,11 @@ function renderTrains() {
     const scheduled = d.scheduled ? new Date(d.scheduled) : expected;
     const delay = Math.round((d.delay_seconds || 0) / 60);
     const mins = Math.max(0, Math.floor((expected - now) / 60000));
+    const day = dayLabel(scheduled);
 
     const time = d.realtime && !d.canceled && delay > 0
-      ? el("div", { class: "t-time" }, el("s", {}, hhmm(scheduled)), el("span", { class: "late" }, hhmm(expected)))
-      : el("div", { class: "t-time" }, el("strong", {}, hhmm(scheduled)));
+      ? el("div", { class: "t-time" }, day, el("s", {}, hhmm(scheduled)), el("span", { class: "late" }, hhmm(expected)))
+      : el("div", { class: "t-time" }, day, el("strong", {}, hhmm(scheduled)));
 
     let status;
     if (d.canceled) status = el("span", { class: "canceled-tag" }, "Supprimé");
@@ -319,9 +394,13 @@ function renderTrains() {
       el("div", { style: "min-width:0" },
         el("div", { class: "dest" }, d.destination || "—"),
         el("div", { class: "meta" }, label ? el("span", { class: "mode " + modeClass(d.mode) }, label) : null,
-          d.via.length ? el("span", { class: "via" }, "via " + d.via.slice(0, 3).join(", ") + (d.via.length > 3 ? "…" : "")) : null)),
+          d.arrival
+            ? el("span", { class: "arrival" }, `arrivée ${hhmm(new Date(d.arrival))}` +
+                (norm(d.arrival_stop) !== norm(d.destination) && norm(d.arrival_stop) !== norm(trainTo)
+                ? ` · ${d.arrival_stop}` : ""))
+            : d.via.length ? el("span", { class: "via" }, "via " + d.via.slice(0, 3).join(", ") + (d.via.length > 3 ? "…" : "")) : null)),
       el("div", { class: "t-status" }, status,
-        d.canceled ? null : el("span", { class: "in" }, mins === 0 ? "maintenant" : `dans ${mins} min`))));
+        d.canceled ? null : el("span", { class: "in" }, mins === 0 ? "maintenant" : mins < 120 ? `dans ${mins} min` : `dans ${Math.floor(mins / 60)} h ${String(mins % 60).padStart(2, "0")}`))));
   }
 }
 
@@ -330,7 +409,8 @@ async function loadTrains() {
   if (tab !== "trains") return;
   let delay = REFRESH_MS;
   try {
-    trainsData = await api("trains", { limit: 20 });
+    writeUrl();
+    trainsData = await api("trains/departures", { limit: 20, to: trainTo });
     $("station-name").textContent = "Gare de " + trainsData.station;
     showTrainsNotice(trainsData.realtime_available ? "" : "Temps réel SNCF indisponible : horaires prévus uniquement.");
     $("trains-updated").textContent = "Mis à jour à " + hhmm(new Date());
@@ -341,6 +421,70 @@ async function loadTrains() {
   renderTrains();
   trainsTimer = setTimeout(loadTrains, delay);
 }
+
+function dayLabel(date) {
+  const today = new Date();
+  const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+  if (date.toDateString() === today.toDateString()) return null;
+  const label = date.toDateString() === tomorrow.toDateString()
+    ? "Demain"
+    : date.toLocaleDateString("fr-FR", { weekday: "short" });
+  return el("span", { class: "day" }, label);
+}
+
+// Recherche de destination : suggestions filtrées localement.
+const toInput = $("to-input");
+const toBox = $("to-suggestions");
+let toActive = -1;
+
+function closeToSuggestions() { toBox.hidden = true; toActive = -1; }
+
+function pickDestination(name) {
+  toInput.value = "";
+  closeToSuggestions();
+  toInput.blur();
+  setTrainTo(name);
+}
+
+toInput.addEventListener("input", async () => {
+  const q = toInput.value.trim();
+  if (q.length < 2) return closeToSuggestions();
+  if (!destinations) {
+    try { destinations = await api("trains/destinations", {}); } catch { return; }
+  }
+  const nq = norm(q);
+  const stations = destinations.filter((n) => norm(n).includes(nq)).slice(0, 12);
+  // Une ville à plusieurs gares (« Paris ») est proposée en premier.
+  const city = destinations.filter((n) => cityMatch(q, n)).length > 1 ? q.charAt(0).toUpperCase() + q.slice(1) : null;
+  const options = [
+    ...(city ? [[city, `${city} (toutes les gares)`]] : []),
+    ...stations.map((n) => [n, n]),
+  ];
+  toBox.replaceChildren(...options.map(([value, label]) =>
+    el("li", { role: "option", "data-value": value, onmousedown: (e) => { e.preventDefault(); pickDestination(value); } }, label)));
+  if (!options.length) toBox.append(el("li", { "aria-disabled": "true" }, "Aucune gare desservie depuis Tours"));
+  toBox.hidden = false;
+  toActive = -1;
+});
+
+toInput.addEventListener("keydown", (e) => {
+  const items = [...toBox.querySelectorAll('li[role="option"]')];
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    if (!items.length) return;
+    toActive = (toActive + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+    items.forEach((li, i) => li.setAttribute("aria-selected", String(i === toActive)));
+  } else if (e.key === "Escape") closeToSuggestions();
+});
+
+$("to-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const items = [...toBox.querySelectorAll('li[role="option"]')];
+  const choice = items[toActive] || items[0];
+  if (choice) pickDestination(choice.dataset.value);
+});
+toInput.addEventListener("blur", () => setTimeout(closeToSuggestions, 100));
+$("to-fav").addEventListener("click", toggleTrainFavorite);
 
 // --- Onglets ---------------------------------------------------------------------
 
@@ -418,7 +562,10 @@ $("rt-only").addEventListener("change", (e) => { state.rt = e.target.checked ? "
 $("refresh").addEventListener("click", loadDepartures);
 $("fav-toggle").addEventListener("click", toggleFavorite);
 // Favoris modifiés dans un autre onglet.
-window.addEventListener("storage", (e) => { if (e.key === FAVORITES_KEY) { favorites = loadFavorites(); renderFavorites(); } });
+window.addEventListener("storage", (e) => {
+  if (e.key === FAVORITES_KEY) { favorites = loadFavorites(); renderFavorites(); }
+  if (e.key === TRAIN_FAVORITES_KEY) { trainFavorites = loadTrainFavorites(); renderTrainDestinations(); }
+});
 $("trains-refresh").addEventListener("click", loadTrains);
 $("tab-bus").addEventListener("click", () => switchTab("bus"));
 $("tab-trains").addEventListener("click", () => switchTab("trains"));
@@ -428,4 +575,5 @@ document.addEventListener("visibilitychange", () => {
 setInterval(() => (tab === "bus" ? renderDepartures : renderTrains)(), 15000);  // décompte des minutes
 
 renderFavorites();
+renderTrainDestinations();
 switchTab(tab);

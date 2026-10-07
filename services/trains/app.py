@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from fastapi import FastAPI, Query
 
 from filbleu.departures import next_departures
-from filbleu.gtfs import DEFAULT_MAX_AGE, TIMEZONE, Gtfs
+from filbleu.gtfs import DEFAULT_MAX_AGE, TIMEZONE, Gtfs, normalize
 from filbleu.realtime import fetch_trip_updates
 
 GTFS_URL = os.environ.get(
@@ -89,14 +89,46 @@ def mode(stop_id: str) -> str:
     return name.removeprefix("Train ")  # « Train TER » -> « TER »
 
 
-def stops_after(gtfs: Gtfs, trip_id: str, stop_id: str) -> list[str]:
-    """Noms des arrêts desservis après ``stop_id`` ; le dernier est la destination."""
+def station_stop_ids(gtfs: Gtfs) -> list[str]:
+    return [r[0] for r in gtfs.db.execute(
+        "SELECT stop_id FROM stops WHERE parent_station = ?", (STATION,))] or [STATION]
+
+
+def stops_after(gtfs: Gtfs, trip_id: str, stop_id: str) -> list[dict]:
+    """Arrêts desservis après ``stop_id`` (nom, décalage d'arrivée en secondes depuis
+    le départ de ``stop_id``) ; le dernier est la destination."""
     rows = gtfs.db.execute(
-        "SELECT st.stop_id, s.stop_name FROM stop_times st JOIN stops s ON s.stop_id = st.stop_id "
-        "WHERE st.trip_id = ? ORDER BY st.stop_sequence", (trip_id,)).fetchall()
+        "SELECT st.stop_id, s.stop_name, st.arrival, st.departure FROM stop_times st "
+        "JOIN stops s ON s.stop_id = st.stop_id WHERE st.trip_id = ? ORDER BY st.stop_sequence",
+        (trip_id,)).fetchall()
     ids = [r["stop_id"] for r in rows]
-    start = ids.index(stop_id) + 1 if stop_id in ids else 0
-    return [r["stop_name"] for r in rows[start:]]
+    if stop_id not in ids:
+        return []
+    i = ids.index(stop_id)
+    origin = rows[i]["departure"]
+    return [{"name": r["stop_name"], "offset": r["arrival"] - origin} for r in rows[i + 1:]]
+
+
+def city_match(query: str, stop_name: str) -> bool:
+    """« Paris » correspond à « Paris Austerlitz » ou « Paris Montparnasse 1 et 2 »."""
+    q, name = normalize(query), normalize(stop_name)
+    return name == q or name.startswith(q + " ") or name.startswith(q + "-")
+
+
+@app.get("/destinations")
+def destinations():
+    """Gares desservies après la gare, pour proposer des destinations."""
+    gtfs: Gtfs = state["gtfs"]
+    ids = station_stop_ids(gtfs)
+    rows = gtfs.db.execute(
+        f"""
+        SELECT DISTINCT s.stop_name FROM stop_times a
+        JOIN stop_times b ON b.trip_id = a.trip_id AND b.stop_sequence > a.stop_sequence
+        JOIN stops s ON s.stop_id = b.stop_id
+        WHERE a.stop_id IN ({",".join("?" * len(ids))})
+        ORDER BY s.stop_name
+        """, ids).fetchall()
+    return [r[0] for r in rows]
 
 
 @app.get("/departures")
@@ -104,25 +136,35 @@ def departures(
     limit: int = Query(15, ge=1, le=50),
     horizon: int = Query(240, ge=10, le=24 * 60),
     realtime_only: bool = False,
+    to: str | None = Query(None, description="ville ou gare desservie après le départ"),
 ):
     gtfs: Gtfs = state["gtfs"]
     station = gtfs.get_stop(STATION)
-    stop_ids = [r[0] for r in gtfs.db.execute(
-        "SELECT stop_id FROM stops WHERE parent_station = ?", (STATION,))] or [STATION]
     updates = realtime_updates()
     now = datetime.now(TIMEZONE)
-    deps = next_departures(gtfs, stop_ids, updates or {}, now=now, limit=limit,
-                           horizon=timedelta(minutes=horizon), realtime_only=realtime_only)
+    if to:
+        # Les trains vers une ville donnée sont rares : on cherche plus loin.
+        horizon = max(horizon, 16 * 60)
+    deps = next_departures(gtfs, station_stop_ids(gtfs), updates or {}, now=now,
+                           limit=500 if to else limit, horizon=timedelta(minutes=horizon),
+                           realtime_only=realtime_only)
     result = []
     for d in deps:
         after = stops_after(gtfs, d.trip_id, d.stop_id)
+        target = next((a for a in after if city_match(to, a["name"])), None) if to else None
+        if to and target is None:
+            continue
+        # Arrivée estimée : même retard qu'au départ.
+        arrival = d.expected + timedelta(seconds=target["offset"]) if target else None
         result.append({
             "mode": mode(d.stop_id),
             "number": d.headsign,  # trip_headsign = numéro de train dans le GTFS SNCF
             "line": d.line,
             "line_color": d.line_color,
-            "destination": after[-1] if after else "",
-            "via": after[:-1],
+            "destination": after[-1]["name"] if after else "",
+            "via": [a["name"] for a in after[:-1]],
+            "arrival": arrival.isoformat() if arrival else None,
+            "arrival_stop": target["name"] if target else None,
             "trip_id": d.trip_id,
             "expected": d.expected.isoformat(),
             "scheduled": d.scheduled.isoformat() if d.scheduled else None,
@@ -130,8 +172,11 @@ def departures(
             "realtime": d.realtime,
             "canceled": d.canceled,
         })
+        if len(result) >= limit:
+            break
     return {
         "station": station.name if station else STATION,
+        "to": to,
         "generated_at": now.isoformat(),
         "realtime_available": updates is not None,
         "departures": result,

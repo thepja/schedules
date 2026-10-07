@@ -55,7 +55,7 @@ body {
 .suggestions {
   position: absolute; left: 0; right: 0; top: calc(100% + 4px); margin: 0; padding: 4px;
   list-style: none; background: var(--surface); border: 1px solid var(--border);
-  border-radius: 10px; box-shadow: var(--shadow); max-height: 50vh; overflow-y: auto;
+  border-radius: 10px; box-shadow: var(--shadow); max-height: 50vh; overflow-y: auto; z-index: 20;
 }
 .suggestions li { padding: 9px 10px; border-radius: 7px; cursor: pointer; }
 .suggestions li[aria-selected="true"], .suggestions li:hover { background: var(--accent-soft); }
@@ -98,6 +98,13 @@ h1 { font-size: 1.6rem; margin: 0; letter-spacing: -.02em; }
 .t-status { text-align: right; font-size: .85rem; font-weight: 600; white-space: nowrap; }
 .t-status .in { display: block; font-weight: 400; color: var(--muted); font-size: .8rem; }
 .on-time { color: var(--live); }
+
+.dest-search { margin-bottom: 12px; }
+.to-title { font-size: 1.6rem; font-weight: 700; letter-spacing: -.02em; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chip .x { margin-left: 2px; color: var(--muted); font-weight: 400; }
+.chip .x:hover { color: var(--danger); }
+.day { display: block; font-size: .7rem; font-weight: 700; text-transform: uppercase; color: var(--accent); letter-spacing: .03em; }
+.arrival { font-size: .8rem; color: var(--text); }
 
 /* Favoris */
 .favorites[hidden] { display: none; }

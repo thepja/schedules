@@ -68,3 +68,12 @@ def test_train_mode():
     assert mode("StopPoint:OCETrain TER-87571000") == "TER"
     assert mode("StopPoint:OCECar TER-87571000") == "Car TER"
     assert mode("autre") == ""
+
+
+def test_city_match():
+    from services.trains.app import city_match
+    assert city_match("Paris", "Paris Austerlitz")
+    assert city_match("paris", "Paris Montparnasse Hall 1 - 2")
+    assert city_match("Orleans", "Orléans")
+    assert not city_match("Paris", "Orléans Avenue de Paris")
+    assert not city_match("Tours", "Joué-lès-Tours")

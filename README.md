@@ -52,7 +52,8 @@ Les URLs peuvent être surchargées via `--gtfs-url` / `--rt-url` (ou les variab
 Un site affiche les prochains passages, rafraîchis toutes les 20 s, avec recherche
 d'arrêt, choix de la direction, filtre « temps réel uniquement » et favoris (arrêt +
 direction, gardés dans le navigateur ; le site s'ouvre sur le premier). Un onglet
-« Trains » liste les départs SNCF (TGV, Intercités, TER) de la gare de Tours. Par défaut il
+« Trains » liste les départs SNCF (TGV, Intercités, TER) de la gare de Tours, filtrables
+par ville de destination (« Paris » couvre toutes ses gares), elles aussi en favoris. Par défaut il
 montre le tram A à Christ Roi direction Lycée J. Monnet ; l'URL garde la sélection
 (`?stop=Christ+Roi&quai=TTR:CHRI-1T&line=A&rt=1`).
 

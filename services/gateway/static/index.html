@@ -51,9 +51,20 @@
 
   <main class="wrap" id="view-trains" role="tabpanel" aria-labelledby="tab-trains" hidden>
     <section class="stop-head">
-      <h1 id="station-name">Gare de Tours</h1>
+      <div class="title">
+        <h1 id="station-name">Gare de Tours</h1>
+        <span id="to-title" class="to-title" hidden></span>
+        <button id="to-fav" class="star" type="button" aria-pressed="false" title="Ajouter la destination aux favoris" hidden>☆</button>
+      </div>
       <span class="muted small">Départs TGV, Intercités et TER</span>
     </section>
+
+    <form class="search dest-search" id="to-form" autocomplete="off" role="search">
+      <label class="sr-only" for="to-input">Destination</label>
+      <input id="to-input" type="search" placeholder="Destination : ville ou gare…" spellcheck="false">
+      <ul id="to-suggestions" class="suggestions" role="listbox" hidden></ul>
+    </form>
+    <nav id="to-chips" class="directions" aria-label="Destinations favorites"></nav>
     <p id="trains-notice" class="notice" hidden></p>
     <ol id="trains" class="departures" aria-live="polite"></ol>
     <footer class="status">
