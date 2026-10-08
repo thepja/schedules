@@ -12,6 +12,7 @@ import io
 import os
 import sqlite3
 import ssl
+import threading
 import time
 import unicodedata
 import urllib.request
@@ -251,9 +252,18 @@ class Gtfs:
     """Accès aux données théoriques stockées dans la base SQLite."""
 
     def __init__(self, db_path: str):
-        # Accès en lecture seule, partagé entre les threads d'un serveur web.
-        self.db = sqlite3.connect(db_path, check_same_thread=False)
-        self.db.row_factory = sqlite3.Row
+        self.db_path = db_path
+        self._local = threading.local()
+
+    @property
+    def db(self) -> sqlite3.Connection:
+        """Connexion propre à chaque thread : une connexion partagée entre les threads
+        d'un serveur web renvoie des résultats corrompus sous accès concurrents."""
+        db = getattr(self._local, "db", None)
+        if db is None:
+            db = self._local.db = sqlite3.connect(self.db_path)
+            db.row_factory = sqlite3.Row
+        return db
 
     @classmethod
     def load(cls, cache_dir: str, url: str = GTFS_URL, max_age: int = DEFAULT_MAX_AGE,

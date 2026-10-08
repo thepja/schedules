@@ -207,3 +207,16 @@ def test_outdated_schema_is_rebuilt(tmp_path, gtfs):
     rebuilt = Gtfs.load(str(tmp_path / "cache"), zip_path=str(zip_path))
     assert rebuilt.db.execute("PRAGMA user_version").fetchone()[0] >= 2
     assert rebuilt.db.execute("SELECT lat FROM stops LIMIT 1").fetchone() is not None
+
+
+def test_gtfs_concurrent_reads(gtfs):
+    """Requêtes simultanées depuis les threads d'un serveur web (cf. résultats corrompus
+    avec une connexion SQLite partagée)."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def work(_):
+        return [sorted(gtfs.active_services(NOW.date())) for _ in range(50)]
+
+    with ThreadPoolExecutor(8) as pool:
+        results = [r for batch in pool.map(work, range(16)) for r in batch]
+    assert all(r == results[0] for r in results)
