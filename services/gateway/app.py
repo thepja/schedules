@@ -78,6 +78,16 @@ async def health():
     return {"status": "ok" if ok else "degraded", "services": results}
 
 
+@app.get("/api/wake")
+async def wake_urls():
+    """Adresses publiques des services, que le navigateur appelle pour les réveiller.
+
+    Sur Render, un service gratuit endormi ne se réveille que sur une requête
+    venant de l'extérieur : celles de la passerelle ne suffisent pas.
+    """
+    return {"urls": [u for u in SERVICES.values() if u.startswith("https://")]}
+
+
 @app.get("/api/{prefix}{rest:path}")
 async def proxy(prefix: str, rest: str, request: Request):
     if prefix not in ROUTES:

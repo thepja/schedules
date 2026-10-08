@@ -36,6 +36,22 @@ function writeUrl() {
   history.replaceState(null, "", "?" + p);
 }
 
+// Sur Render, un service gratuit endormi ne se réveille que sur une requête venant
+// de l'extérieur : le navigateur appelle donc directement chaque service.
+const WAKE_INTERVAL_MS = 60000;
+let lastWake = 0;
+
+async function wakeServices() {
+  if (Date.now() - lastWake < WAKE_INTERVAL_MS) return;
+  lastWake = Date.now();
+  try {
+    const { urls } = await (await fetch(new URL("api/wake", location.href))).json();
+    for (const u of urls) fetch(u + "/health", { mode: "no-cors", cache: "no-store" }).catch(() => {});
+  } catch {
+    lastWake = 0; // passerelle elle-même en cours de réveil : on réessaiera
+  }
+}
+
 async function api(path, params) {
   const url = new URL("api/" + path, location.href);
   for (const [k, v] of Object.entries(params)) if (v !== "" && v != null) url.searchParams.append(k, v);
@@ -43,10 +59,14 @@ async function api(path, params) {
   try {
     resp = await fetch(url);
   } catch {
+    wakeServices();
     throw Object.assign(new Error(WAKE_MESSAGE), { waking: true });
   }
   const body = await resp.json().catch(() => ({}));
-  if (WAKE_STATUSES.includes(resp.status)) throw Object.assign(new Error(WAKE_MESSAGE), { waking: true });
+  if (WAKE_STATUSES.includes(resp.status)) {
+    wakeServices();
+    throw Object.assign(new Error(WAKE_MESSAGE), { waking: true });
+  }
   if (!resp.ok) throw new Error(body.detail || `Erreur ${resp.status}`);
   return body;
 }
@@ -718,10 +738,12 @@ $("tab-bus").addEventListener("click", () => switchTab("bus"));
 $("tab-trains").addEventListener("click", () => switchTab("trains"));
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) return;
+  wakeServices();
   if (tab === "bus") { loadDepartures(); loadVehicles(); } else loadTrains();
 });
 setInterval(() => (tab === "bus" ? renderDepartures : renderTrains)(), 15000);  // décompte des minutes
 
+wakeServices();
 renderFavorites();
 renderTrainDestinations();
 switchTab(tab);

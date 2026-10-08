@@ -78,3 +78,14 @@ def test_city_match():
     assert city_match("Orleans", "Orléans")
     assert not city_match("Paris", "Orléans Avenue de Paris")
     assert not city_match("Tours", "Joué-lès-Tours")
+
+
+def test_gateway_wake_urls(monkeypatch):
+    from services.gateway import app as gateway
+
+    monkeypatch.setattr(gateway, "SERVICES", {
+        "gtfs": "https://filbleu-gtfs.onrender.com",
+        "realtime": "http://localhost:8002",
+    })
+    resp = TestClient(gateway.app).get("/api/wake")
+    assert resp.json() == {"urls": ["https://filbleu-gtfs.onrender.com"]}
