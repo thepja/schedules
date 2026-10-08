@@ -99,6 +99,10 @@ h1 { font-size: 1.6rem; margin: 0; letter-spacing: -.02em; }
 .via { font-size: .8rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .t-status { text-align: right; font-size: .85rem; font-weight: 600; white-space: nowrap; }
 .t-status .in { display: block; font-weight: 400; color: var(--muted); font-size: .8rem; }
+.t-status .platform {
+  display: block; width: fit-content; margin: 0 0 4px auto; padding: 1px 7px; border-radius: 5px;
+  background: var(--accent); color: var(--bg); font-weight: 800; font-size: .8rem;
+}
 .on-time { color: var(--live); }
 
 .dest-search { margin-bottom: 12px; }

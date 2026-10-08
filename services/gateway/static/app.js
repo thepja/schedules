@@ -561,7 +561,9 @@ function renderTrains() {
                 (norm(d.arrival_stop) !== norm(d.destination) && norm(d.arrival_stop) !== norm(trainTo)
                 ? ` · ${d.arrival_stop}` : ""))
             : d.via.length ? el("span", { class: "via" }, "via " + d.via.slice(0, 3).join(", ") + (d.via.length > 3 ? "…" : "")) : null)),
-      el("div", { class: "t-status" }, status,
+      el("div", { class: "t-status" },
+        d.platform && !d.canceled ? el("span", { class: "platform", title: "Voie" }, "Voie " + d.platform) : null,
+        status,
         d.canceled ? null : el("span", { class: "in" }, mins === 0 ? "maintenant" : mins < 120 ? `dans ${mins} min` : `dans ${Math.floor(mins / 60)} h ${String(mins % 60).padStart(2, "0")}`))));
   }
 }

@@ -20,6 +20,8 @@ from filbleu.departures import next_departures
 from filbleu.gtfs import DEFAULT_MAX_AGE, TIMEZONE, Gtfs, normalize
 from filbleu.realtime import fetch_trip_updates
 
+from .platforms import SIRI_ET_URL, fetch_platforms, uic_of
+
 GTFS_URL = os.environ.get(
     "SNCF_GTFS_URL", "https://eu.ftp.opendatasoft.com/sncf/plandata/Export_OpenData_SNCF_GTFS_NewTripId.zip")
 RT_URL = os.environ.get(
@@ -32,13 +34,15 @@ RT_MAX_AGE = 180
 ALERTS_URL = os.environ.get(
     "SNCF_ALERTS_URL", "https://proxy.transport.data.gouv.fr/resource/sncf-gtfs-rt-service-alerts")
 ALERTS_POLL_SECONDS = 120
+PLATFORMS_URL = os.environ.get("SNCF_SIRI_ET_URL", SIRI_ET_URL)
+PLATFORMS_POLL_SECONDS = int(os.environ.get("SNCF_PLATFORMS_POLL", "120"))
 
 # « StopPoint:OCETGV INOUI-87571000 » -> « TGV INOUI »
 MODE = re.compile(r"^StopPoint:OCE(.+)-\d+$")
 # Les alertes citent « OCESN860594F », début du trip_id GTFS « OCESN860594F1187_F:… ».
 TRAIN_KEY = re.compile(r"^OCESN\d+F")
 
-state: dict = {"gtfs": None, "updates": None, "fetched_at": None, "error": None, "alerts": []}
+state: dict = {"gtfs": None, "updates": None, "fetched_at": None, "error": None, "alerts": [], "platforms": {}}
 
 
 def train_key(trip_id: str) -> str:
@@ -69,6 +73,16 @@ async def poll_alerts():
         await asyncio.sleep(ALERTS_POLL_SECONDS)
 
 
+async def poll_platforms():
+    while True:
+        try:
+            state["platforms"] = await asyncio.to_thread(fetch_platforms, uic_of(STATION),
+                                                         PLATFORMS_URL)
+        except Exception:
+            pass  # on garde les dernières voies connues
+        await asyncio.sleep(PLATFORMS_POLL_SECONDS)
+
+
 async def poll_realtime():
     while True:
         try:
@@ -83,7 +97,7 @@ async def poll_realtime():
 async def lifespan(app: FastAPI):
     state["gtfs"] = await asyncio.to_thread(load_gtfs)
     tasks = [asyncio.create_task(refresh_gtfs()), asyncio.create_task(poll_realtime()),
-             asyncio.create_task(poll_alerts())]
+             asyncio.create_task(poll_alerts()), asyncio.create_task(poll_platforms())]
     yield
     for t in tasks:
         t.cancel()
@@ -177,9 +191,11 @@ def departures(
             continue
         # Arrivée estimée : même retard qu'au départ.
         arrival = d.expected + timedelta(seconds=target["offset"]) if target else None
+        day = (d.scheduled or d.expected).astimezone(TIMEZONE).date()
         result.append({
             "mode": mode(d.stop_id),
             "number": d.headsign,  # trip_headsign = numéro de train dans le GTFS SNCF
+            "platform": state["platforms"].get((d.headsign, day)),
             "line": d.line,
             "line_color": d.line_color,
             "destination": after[-1]["name"] if after else "",

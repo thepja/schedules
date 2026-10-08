@@ -89,3 +89,59 @@ def test_gateway_wake_urls(monkeypatch):
     })
     resp = TestClient(gateway.app).get("/api/wake")
     assert resp.json() == {"urls": ["https://filbleu-gtfs.onrender.com"]}
+
+
+SIRI_ET = b"""<?xml version="1.0" encoding="UTF-8"?>
+<Siri xmlns="http://www.siri.org.uk/siri" version="2.0">
+ <ServiceDelivery><EstimatedTimetableDelivery><EstimatedJourneyVersionFrame>
+  <EstimatedVehicleJourney>
+   <DatedVehicleJourneyRef>SNCF:2026-10-08:860594:1187:Train</DatedVehicleJourneyRef>
+   <TrainNumbers><TrainNumberRef>860594</TrainNumberRef></TrainNumbers>
+   <EstimatedCalls>
+    <EstimatedCall>
+     <StopPointRef>ScheduledStopPoint::87547000</StopPointRef>
+     <AimedDepartureTime>2026-10-08T06:00:00+02:00</AimedDepartureTime>
+     <DeparturePlatformName>7</DeparturePlatformName>
+    </EstimatedCall>
+    <EstimatedCall>
+     <StopPointRef>ScheduledStopPoint::87571000</StopPointRef>
+     <AimedDepartureTime>2026-10-08T07:12:00+02:00</AimedDepartureTime>
+     <DeparturePlatformName>2</DeparturePlatformName>
+    </EstimatedCall>
+   </EstimatedCalls>
+  </EstimatedVehicleJourney>
+  <EstimatedVehicleJourney>
+   <DatedVehicleJourneyRef>SNCF:2026-10-08:4471:1187:Train</DatedVehicleJourneyRef>
+   <EstimatedCalls>
+    <EstimatedCall>
+     <StopPointRef>ScheduledStopPoint::87571000</StopPointRef>
+     <AimedArrivalTime>2026-10-08T23:58:00+02:00</AimedArrivalTime>
+     <AimedDepartureTime>2026-10-09T00:05:00+02:00</AimedDepartureTime>
+     <ArrivalPlatformName>5B</ArrivalPlatformName>
+    </EstimatedCall>
+   </EstimatedCalls>
+  </EstimatedVehicleJourney>
+  <EstimatedVehicleJourney>
+   <TrainNumbers><TrainNumberRef>9999</TrainNumberRef></TrainNumbers>
+   <EstimatedCalls><EstimatedCall>
+    <StopPointRef>ScheduledStopPoint::87571000</StopPointRef>
+    <AimedDepartureTime>2026-10-08T08:00:00+02:00</AimedDepartureTime>
+   </EstimatedCall></EstimatedCalls>
+  </EstimatedVehicleJourney>
+ </EstimatedJourneyVersionFrame></EstimatedTimetableDelivery></ServiceDelivery>
+</Siri>
+"""
+
+
+def test_platforms_from_siri_et():
+    import io
+    from datetime import date
+
+    from services.trains.platforms import parse_platforms, uic_of
+
+    assert uic_of("StopArea:OCE87571000") == "87571000"
+    assert parse_platforms(io.BytesIO(SIRI_ET), "87571000") == {
+        ("860594", date(2026, 10, 8)): "2",
+        # Numéro tiré de DatedVehicleJourneyRef ; jour du départ (après minuit).
+        ("4471", date(2026, 10, 9)): "5B",
+    }
